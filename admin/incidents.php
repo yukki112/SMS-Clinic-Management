@@ -2253,7 +2253,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
     <!-- Template for medicine row -->
     <template id="medicine-row-template">
         <div class="medicine-row">
-            <select name="medicine_items[]" class="form-control medicine-select" onchange="updateMedicineStock(this)" required>
+            <select name="medicine_items[]" class="form-control medicine-select" onchange="updateMedicineStock(this)">
                 <option value="">Select medicine/supply</option>
                 <?php foreach ($clinic_stock as $item): ?>
                     <option value="<?php echo $item['id']; ?>" 
