@@ -2,8 +2,8 @@
 // config/database.php
 class Database {
     private $host = "localhost";
-    private $db_name = "clinic";
-    private $username = "clinic";
+    private $db_name = "cms_clinic";
+    private $username = "cms_clinic";
     private $password = "Admin123";
     public $conn;
 
