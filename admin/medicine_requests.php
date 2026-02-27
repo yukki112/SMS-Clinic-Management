@@ -21,7 +21,7 @@ $error_message = '';
 
 // Create necessary tables if they don't exist
 try {
-    // Clinic stock table (what's inside the clinic)
+    // Clinic stock table
     $db->exec("CREATE TABLE IF NOT EXISTS `clinic_stock` (
         `id` int(11) NOT NULL AUTO_INCREMENT,
         `item_code` varchar(50) NOT NULL,
@@ -47,6 +47,7 @@ try {
         `item_code` varchar(50) NOT NULL,
         `item_name` varchar(200) NOT NULL,
         `category` enum('Medicine','Supply') NOT NULL,
+        `unit` varchar(20) DEFAULT NULL,
         `quantity_requested` int(11) NOT NULL,
         `quantity_approved` int(11) DEFAULT NULL,
         `reason` text NOT NULL,
@@ -57,12 +58,12 @@ try {
         `requested_date` timestamp NOT NULL DEFAULT current_timestamp(),
         `approved_by` int(11) DEFAULT NULL,
         `approved_date` datetime DEFAULT NULL,
+        `released_by` varchar(100) DEFAULT NULL,
         `released_date` datetime DEFAULT NULL,
         `notes` text DEFAULT NULL,
         PRIMARY KEY (`id`),
         UNIQUE KEY `request_code` (`request_code`),
         KEY `requested_by` (`requested_by`),
-        KEY `approved_by` (`approved_by`),
         KEY `status` (`status`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
 
@@ -81,8 +82,6 @@ try {
         `dispensed_by` int(11) NOT NULL,
         `reason` text NOT NULL,
         PRIMARY KEY (`id`),
-        KEY `visit_id` (`visit_id`),
-        KEY `student_id` (`student_id`),
         KEY `item_code` (`item_code`),
         KEY `dispensed_by` (`dispensed_by`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
@@ -98,17 +97,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (isset($_POST['action']) && $_POST['action'] == 'create_request') {
         try {
             // Fetch item details from property custodian API
-            $api_url = "https://qcprotektado.com/api/clinic.php/";
+            $api_url = "https://qcprotektado.com/api/clinic_api.php?endpoint=";
             if ($_POST['category'] == 'Medicine') {
-                $api_url .= "medicines?id=" . $_POST['item_id'];
+                $api_url .= "medicines&id=" . $_POST['item_id'];
             } else {
-                $api_url .= "supplies?id=" . $_POST['item_id'];
+                $api_url .= "supplies&id=" . $_POST['item_id'];
             }
             
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $api_url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
             $response = curl_exec($ch);
             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
@@ -125,29 +125,43 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $random = rand(1000, 9999);
                     $request_code = $prefix . '-' . $date . '-' . $random;
                     
-                    // In the create request section, update the INSERT query:
-$query = "INSERT INTO medicine_requests (
-    request_code, item_code, item_name, category, unit,
-    quantity_requested, reason, urgency, requested_by, 
-    requested_by_name, notes
-) VALUES (
-    :request_code, :item_code, :item_name, :category, :unit,
-    :quantity, :reason, :urgency, :requested_by,
-    :requested_by_name, :notes
-)";
-
-// And add this line before binding:
-$unit = $_POST['category'] == 'Medicine' ? ($item['unit'] ?? 'tablet') : ($item['unit'] ?? 'piece');
-$stmt->bindParam(':unit', $unit);
+                    // Determine unit
+                    $unit = '';
+                    if ($_POST['category'] == 'Medicine') {
+                        $unit = $item['unit'] ?? 'tablet';
+                    } else {
+                        $unit = $item['unit'] ?? 'piece';
+                    }
+                    
+                    // Get item name
+                    $item_name = '';
+                    if ($_POST['category'] == 'Medicine') {
+                        $item_name = ($item['generic_name'] ?? '') . ' ' . ($item['strength'] ?? '');
+                    } else {
+                        $item_name = $item['supply_name'] ?? $item['item_name'] ?? 'Unknown Item';
+                    }
+                    
+                    $item_code = $_POST['category'] == 'Medicine' ? 
+                        ($item['medicine_code'] ?? 'MED-' . $item['id']) : 
+                        ($item['supply_code'] ?? 'SUP-' . $item['id']);
+                    
+                    $query = "INSERT INTO medicine_requests (
+                        request_code, item_code, item_name, category, unit,
+                        quantity_requested, reason, urgency, requested_by, 
+                        requested_by_name, notes
+                    ) VALUES (
+                        :request_code, :item_code, :item_name, :category, :unit,
+                        :quantity, :reason, :urgency, :requested_by,
+                        :requested_by_name, :notes
+                    )";
                     
                     $stmt = $db->prepare($query);
-                    $item_code = $_POST['category'] == 'Medicine' ? $item['medicine_code'] : $item['supply_code'];
-                    $item_name = $_POST['category'] == 'Medicine' ? $item['generic_name'] . ' ' . $item['strength'] : $item['supply_name'];
                     
                     $stmt->bindParam(':request_code', $request_code);
                     $stmt->bindParam(':item_code', $item_code);
                     $stmt->bindParam(':item_name', $item_name);
                     $stmt->bindParam(':category', $_POST['category']);
+                    $stmt->bindParam(':unit', $unit);
                     $stmt->bindParam(':quantity', $_POST['quantity']);
                     $stmt->bindParam(':reason', $_POST['reason']);
                     $stmt->bindParam(':urgency', $_POST['urgency']);
@@ -160,13 +174,20 @@ $stmt->bindParam(':unit', $unit);
                     } else {
                         $error_message = "Failed to submit request.";
                     }
+                } else {
+                    $error_message = "Invalid response from property custodian.";
                 }
             } else {
-                $error_message = "Failed to fetch item details from property custodian.";
+                $error_message = "Failed to fetch item details from property custodian. HTTP Code: " . $http_code;
             }
         } catch (Exception $e) {
             $error_message = "Error: " . $e->getMessage();
         }
+    }
+    
+    // Check for approved/released requests from property custodian
+    if (isset($_POST['action']) && $_POST['action'] == 'check_updates') {
+        checkForApprovedRequests($db);
     }
     
     // Dispense medicine to student
@@ -227,9 +248,77 @@ $stmt->bindParam(':unit', $unit);
     }
 }
 
+// Function to check for approved requests from property custodian
+function checkForApprovedRequests($db) {
+    try {
+        // Get pending requests that might be approved
+        $query = "SELECT * FROM medicine_requests WHERE status = 'pending' ORDER BY id DESC";
+        $stmt = $db->query($query);
+        $pending_requests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $updated_count = 0;
+        
+        foreach ($pending_requests as $request) {
+            // Check with property custodian API for status
+            $api_url = "https://qcprotektado.com/api/clinic_requests.php?endpoint=request&id=" . $request['id'];
+            
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $api_url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+            $response = curl_exec($ch);
+            curl_close($ch);
+            
+            if ($response) {
+                $data = json_decode($response, true);
+                if (isset($data['data']['status']) && $data['data']['status'] != $request['status']) {
+                    // Update status in local database
+                    $update = $db->prepare("UPDATE medicine_requests SET status = :status WHERE id = :id");
+                    $update->bindParam(':status', $data['data']['status']);
+                    $update->bindParam(':id', $request['id']);
+                    $update->execute();
+                    
+                    // If released, add to clinic stock
+                    if ($data['data']['status'] == 'released') {
+                        $check_stock = $db->prepare("SELECT * FROM clinic_stock WHERE request_id = :request_id");
+                        $check_stock->bindParam(':request_id', $request['id']);
+                        $check_stock->execute();
+                        
+                        if ($check_stock->rowCount() == 0) {
+                            $stock_query = "INSERT INTO clinic_stock 
+                                           (item_code, item_name, category, quantity, unit, date_received, received_from, request_id)
+                                           VALUES 
+                                           (:item_code, :item_name, :category, :quantity, :unit, CURDATE(), :received_from, :request_id)";
+                            
+                            $stock_stmt = $db->prepare($stock_query);
+                            $stock_stmt->bindParam(':item_code', $request['item_code']);
+                            $stock_stmt->bindParam(':item_name', $request['item_name']);
+                            $stock_stmt->bindParam(':category', $request['category']);
+                            $stock_stmt->bindParam(':quantity', $data['data']['quantity_approved']);
+                            $stock_stmt->bindParam(':unit', $request['unit']);
+                            $stock_stmt->bindParam(':received_from', $data['data']['released_by']);
+                            $stock_stmt->bindParam(':request_id', $request['id']);
+                            $stock_stmt->execute();
+                        }
+                    }
+                    
+                    $updated_count++;
+                }
+            }
+        }
+        
+        return $updated_count;
+        
+    } catch (Exception $e) {
+        error_log("Error checking updates: " . $e->getMessage());
+        return 0;
+    }
+}
+
 // Fetch data from property custodian API
 function fetchPropertyItems($type) {
-    $api_url = "https://qcprotektado.com/api/clinic.php/" . $type;
+    $api_url = "https://qcprotektado.com/api/clinic_api.php?endpoint=" . $type;
     
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -296,6 +385,15 @@ $pending_requests = getPendingRequests($db);
 $request_history = getRequestHistory($db);
 $dispensing_history = getDispensingHistory($db);
 
+// Check for updates from property custodian
+$updated_count = checkForApprovedRequests($db);
+if ($updated_count > 0) {
+    // Refresh data
+    $clinic_stock = getClinicStock($db);
+    $pending_requests = getPendingRequests($db);
+    $request_history = getRequestHistory($db);
+}
+
 // Get counts
 $total_medicines = count($medicines);
 $total_supplies = count($supplies);
@@ -313,6 +411,7 @@ $pending_count = count($pending_requests);
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
     <style>
+        /* Your existing CSS styles remain exactly the same */
         * {
             margin: 0;
             padding: 0;
@@ -391,6 +490,12 @@ $pending_count = count($pending_requests);
             background: #ffebee;
             border: 1px solid #ffcdd2;
             color: #c62828;
+        }
+
+        .alert-info {
+            background: #e3f2fd;
+            border: 1px solid #90caf9;
+            color: #1565c0;
         }
 
         @keyframes slideIn {
@@ -735,6 +840,15 @@ $pending_count = count($pending_requests);
             background: #cfd8dc;
         }
 
+        .btn-success {
+            background: #2e7d32;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #1b5e20;
+        }
+
         .btn-small {
             padding: 6px 12px;
             font-size: 0.8rem;
@@ -846,6 +960,32 @@ $pending_count = count($pending_requests);
             opacity: 0.7;
         }
 
+        /* Refresh Button */
+        .refresh-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: white;
+            border: 1px solid #191970;
+            border-radius: 8px;
+            color: #191970;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            background: #191970;
+            color: white;
+        }
+
+        .refresh-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
         @keyframes fadeInUp {
             from {
                 opacity: 0;
@@ -928,6 +1068,17 @@ $pending_count = count($pending_requests);
                     </div>
                 <?php endif; ?>
 
+                <?php if ($updated_count > 0): ?>
+                    <div class="alert alert-info">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="16" x2="12" y2="12"/>
+                            <line x1="12" y1="8" x2="12.01" y2="8"/>
+                        </svg>
+                        <?php echo $updated_count; ?> request(s) have been updated by property custodian.
+                    </div>
+                <?php endif; ?>
+
                 <!-- Stats Grid -->
                 <div class="stats-grid">
                     <div class="stat-card">
@@ -988,9 +1139,6 @@ $pending_count = count($pending_requests);
                     </div>
                 </div>
 
-                   
-        
-
                 <!-- Tabs Section -->
                 <div class="tabs-section">
                     <div class="tabs-header">
@@ -1030,23 +1178,23 @@ $pending_count = count($pending_requests);
                                                 <option value="">Select Item</option>
                                                 <?php foreach ($medicines as $medicine): ?>
                                                     <option class="medicine-item" value="<?php echo $medicine['id']; ?>" 
-                                                            data-code="<?php echo $medicine['medicine_code']; ?>"
-                                                            data-name="<?php echo $medicine['generic_name'] . ' ' . ($medicine['strength'] ?? ''); ?>"
-                                                            data-unit="<?php echo $medicine['unit']; ?>"
-                                                            data-stock="<?php echo $medicine['current_stock']; ?>">
-                                                        <?php echo $medicine['generic_name']; ?> 
+                                                            data-code="<?php echo $medicine['medicine_code'] ?? 'MED-'.$medicine['id']; ?>"
+                                                            data-name="<?php echo ($medicine['generic_name'] ?? '') . ' ' . ($medicine['strength'] ?? ''); ?>"
+                                                            data-unit="<?php echo $medicine['unit'] ?? 'tablet'; ?>"
+                                                            data-stock="<?php echo $medicine['current_stock'] ?? 0; ?>">
+                                                        <?php echo $medicine['generic_name'] ?? 'Unknown'; ?> 
                                                         <?php if (!empty($medicine['strength'])): ?>(<?php echo $medicine['strength']; ?>)<?php endif; ?>
-                                                        - Stock: <?php echo $medicine['current_stock']; ?> <?php echo $medicine['unit']; ?>
+                                                        - Stock: <?php echo $medicine['current_stock'] ?? 0; ?> <?php echo $medicine['unit'] ?? 'units'; ?>
                                                     </option>
                                                 <?php endforeach; ?>
                                                 <?php foreach ($supplies as $supply): ?>
                                                     <option class="supply-item" value="<?php echo $supply['id']; ?>" 
-                                                            data-code="<?php echo $supply['supply_code']; ?>"
-                                                            data-name="<?php echo $supply['supply_name']; ?>"
-                                                            data-unit="<?php echo $supply['unit']; ?>"
-                                                            data-stock="<?php echo $supply['current_stock']; ?>">
-                                                        <?php echo $supply['supply_name']; ?> 
-                                                        - Stock: <?php echo $supply['current_stock']; ?> <?php echo $supply['unit']; ?>
+                                                            data-code="<?php echo $supply['supply_code'] ?? 'SUP-'.$supply['id']; ?>"
+                                                            data-name="<?php echo $supply['supply_name'] ?? ''; ?>"
+                                                            data-unit="<?php echo $supply['unit'] ?? 'piece'; ?>"
+                                                            data-stock="<?php echo $supply['current_stock'] ?? 0; ?>">
+                                                        <?php echo $supply['supply_name'] ?? 'Unknown'; ?> 
+                                                        - Stock: <?php echo $supply['current_stock'] ?? 0; ?> <?php echo $supply['unit'] ?? 'units'; ?>
                                                     </option>
                                                 <?php endforeach; ?>
                                             </select>
@@ -1108,12 +1256,12 @@ $pending_count = count($pending_requests);
                                                 <?php foreach ($medicines as $medicine): ?>
                                                 <tr class="preview-row medicine-item">
                                                     <td>
-                                                        <strong><?php echo $medicine['generic_name']; ?></strong><br>
+                                                        <strong><?php echo $medicine['generic_name'] ?? 'Unknown'; ?></strong><br>
                                                         <small><?php echo $medicine['strength'] ?? ''; ?> | <?php echo $medicine['dosage_form'] ?? ''; ?></small>
                                                     </td>
-                                                    <td><?php echo $medicine['current_stock']; ?> <?php echo $medicine['unit']; ?></td>
+                                                    <td><?php echo $medicine['current_stock'] ?? 0; ?> <?php echo $medicine['unit'] ?? 'units'; ?></td>
                                                     <td>
-                                                        <?php if ($medicine['current_stock'] <= ($medicine['minimum_stock'] ?? 10)): ?>
+                                                        <?php if (($medicine['current_stock'] ?? 0) <= ($medicine['minimum_stock'] ?? 10)): ?>
                                                             <span class="status-badge status-pending">Low Stock</span>
                                                         <?php else: ?>
                                                             <span class="status-badge status-approved">Available</span>
@@ -1124,12 +1272,12 @@ $pending_count = count($pending_requests);
                                                 <?php foreach ($supplies as $supply): ?>
                                                 <tr class="preview-row supply-item">
                                                     <td>
-                                                        <strong><?php echo $supply['supply_name']; ?></strong><br>
+                                                        <strong><?php echo $supply['supply_name'] ?? 'Unknown'; ?></strong><br>
                                                         <small><?php echo $supply['description'] ?? ''; ?></small>
                                                     </td>
-                                                    <td><?php echo $supply['current_stock']; ?> <?php echo $supply['unit']; ?></td>
+                                                    <td><?php echo $supply['current_stock'] ?? 0; ?> <?php echo $supply['unit'] ?? 'units'; ?></td>
                                                     <td>
-                                                        <?php if ($supply['current_stock'] <= ($supply['minimum_stock'] ?? 10)): ?>
+                                                        <?php if (($supply['current_stock'] ?? 0) <= ($supply['minimum_stock'] ?? 10)): ?>
                                                             <span class="status-badge status-pending">Low Stock</span>
                                                         <?php else: ?>
                                                             <span class="status-badge status-approved">Available</span>
@@ -1531,60 +1679,56 @@ $pending_count = count($pending_requests);
             itemSelect.value = '';
         }
 
-// Update this function in the JavaScript section
-function updateItemDetails() {
-    const select = document.getElementById('requestItem');
-    const option = select.options[select.selectedIndex];
-    
-    if (option.value) {
-        const maxStock = option.dataset.stock;
-        const quantityInput = document.getElementById('requestQuantity');
-        quantityInput.max = maxStock;
-        quantityInput.min = 1;
-        quantityInput.placeholder = `Max available: ${maxStock}`;
-        
-        // Add a helper text
-        let helperText = document.getElementById('stockHelper');
-        if (!helperText) {
-            helperText = document.createElement('small');
-            helperText.id = 'stockHelper';
-            helperText.style.display = 'block';
-            helperText.style.color = '#546e7a';
-            helperText.style.marginTop = '4px';
-            helperText.style.fontSize = '0.8rem';
-            quantityInput.parentNode.appendChild(helperText);
+        function updateItemDetails() {
+            const select = document.getElementById('requestItem');
+            const option = select.options[select.selectedIndex];
+            
+            if (option.value) {
+                const maxStock = option.dataset.stock;
+                const quantityInput = document.getElementById('requestQuantity');
+                quantityInput.max = maxStock;
+                quantityInput.min = 1;
+                quantityInput.placeholder = `Max available: ${maxStock}`;
+                
+                let helperText = document.getElementById('stockHelper');
+                if (!helperText) {
+                    helperText = document.createElement('small');
+                    helperText.id = 'stockHelper';
+                    helperText.style.display = 'block';
+                    helperText.style.color = '#546e7a';
+                    helperText.style.marginTop = '4px';
+                    helperText.style.fontSize = '0.8rem';
+                    quantityInput.parentNode.appendChild(helperText);
+                }
+                helperText.innerHTML = `Available from property custodian: ${maxStock} ${option.dataset.unit || 'units'}`;
+            }
         }
-        helperText.innerHTML = `Available from property custodian: ${maxStock} ${option.dataset.unit || 'units'}`;
-    }
-}
 
-// Update validation function
-function validateRequest() {
-    const category = document.getElementById('requestCategory').value;
-    const item = document.getElementById('requestItem').value;
-    const quantity = document.getElementById('requestQuantity').value;
-    const max = document.getElementById('requestQuantity').max;
-    const min = document.getElementById('requestQuantity').min || 1;
-    
-    if (!category || !item || !quantity) {
-        alert('Please fill in all required fields');
-        return false;
-    }
-    
-    if (quantity < min) {
-        alert(`Quantity must be at least ${min}`);
-        return false;
-    }
-    
-    if (quantity > max) {
-        alert(`Cannot request more than what's available from property custodian. Available: ${max}`);
-        return false;
-    }
-    
-    return true;
-}
+        function validateRequest() {
+            const category = document.getElementById('requestCategory').value;
+            const item = document.getElementById('requestItem').value;
+            const quantity = document.getElementById('requestQuantity').value;
+            const max = document.getElementById('requestQuantity').max;
+            const min = document.getElementById('requestQuantity').min || 1;
+            
+            if (!category || !item || !quantity) {
+                alert('Please fill in all required fields');
+                return false;
+            }
+            
+            if (quantity < min) {
+                alert(`Quantity must be at least ${min}`);
+                return false;
+            }
+            
+            if (quantity > max) {
+                alert(`Cannot request more than what's available from property custodian. Available: ${max}`);
+                return false;
+            }
+            
+            return true;
+        }
 
-        // Show dispense modal
         function showDispenseModal(code, name, category, unit, available) {
             document.getElementById('dispenseItemCode').value = code;
             document.getElementById('dispenseItemName').value = name;
@@ -1617,10 +1761,17 @@ function validateRequest() {
             return true;
         }
 
-        // Show request modal (for low stock alert)
-        function showRequestModal() {
-            showTab('request', {target: document.querySelector('.tab-btn')});
-            document.querySelector('.tab-btn').click();
+        // Auto refresh function (optional)
+        function refreshData() {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'action';
+            input.value = 'check_updates';
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
         }
 
         // Auto-hide alerts
@@ -1636,11 +1787,13 @@ function validateRequest() {
         document.addEventListener('DOMContentLoaded', function() {
             loadItems();
             
-            // Set page title
             const pageTitle = document.getElementById('pageTitle');
             if (pageTitle) {
                 pageTitle.textContent = 'Medicine Requests';
             }
+            
+            // Auto refresh every 30 seconds (optional)
+            // setInterval(refreshData, 30000);
         });
     </script>
 </body>
