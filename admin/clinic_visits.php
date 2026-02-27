@@ -20,6 +20,14 @@ $db = $database->getConnection();
 $current_user_id = $_SESSION['user_id'];
 $current_user_name = $_SESSION['username'] ?? 'Clinic Staff';
 
+// Get current user full name from database
+$user_query = "SELECT full_name FROM users WHERE id = :user_id";
+$user_stmt = $db->prepare($user_query);
+$user_stmt->bindParam(':user_id', $current_user_id);
+$user_stmt->execute();
+$user_data = $user_stmt->fetch(PDO::FETCH_ASSOC);
+$current_user_fullname = $user_data ? $user_data['full_name'] : $current_user_name;
+
 // Initialize variables
 $student_data = null;
 $search_error = '';
@@ -73,7 +81,7 @@ function getClinicStock($db) {
 $clinic_stock = getClinicStock($db);
 
 // Function to send parent notification email
-function sendParentNotification($student, $visit_data, $db) {
+function sendParentNotification($student, $visit_data, $db, $current_user_id, $current_user_fullname) {
     try {
         // Check if student has emergency contact email
         if (empty($student['emergency_email'])) {
@@ -84,25 +92,25 @@ function sendParentNotification($student, $visit_data, $db) {
         // Get clinic staff info
         $staff_query = "SELECT full_name, email FROM users WHERE id = :user_id";
         $staff_stmt = $db->prepare($staff_query);
-        $staff_stmt->bindParam(':user_id', $_SESSION['user_id']);
+        $staff_stmt->bindParam(':user_id', $current_user_id);
         $staff_stmt->execute();
         $staff = $staff_stmt->fetch(PDO::FETCH_ASSOC);
 
         $mail = new PHPMailer(true);
 
-        // Server settings
+        // Server settings - UPDATE THESE WITH YOUR EMAIL CONFIGURATION
         $mail->isSMTP();
         $mail->Host       = 'smtp.gmail.com'; // Your SMTP server
         $mail->SMTPAuth   = true;
-        $mail->Username   = 'Stephenviray12@gmail.com'; // Your email
-        $mail->Password   = 'bubr nckn tgqf lvus'; // Your app password
+        $mail->Username   = 'your-email@gmail.com'; // Your email
+        $mail->Password   = 'your-app-password'; // Your app password
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
 
         // Recipients
-        $mail->setFrom('icare@gmail.com', 'MedFlow Clinic');
+        $mail->setFrom('clinic@medflow.com', 'MedFlow Clinic');
         $mail->addAddress($student['emergency_email'], $student['emergency_contact'] ?? 'Parent/Guardian');
-        $mail->addReplyTo($staff['email'] ?? 'icare@gmail.com', $staff['full_name'] ?? 'Clinic Staff');
+        $mail->addReplyTo($staff['email'] ?? 'clinic@medflow.com', $staff['full_name'] ?? 'Clinic Staff');
 
         // Content
         $mail->isHTML(true);
@@ -212,7 +220,7 @@ function sendParentNotification($student, $visit_data, $db) {
         
         $mail->send();
         
-        // Log notification
+        // Log notification - FIXED: Make sure called_by is not null
         $log_query = "INSERT INTO parent_notifications (
             incident_id, student_id, parent_name, contact_number, emergency_email,
             notification_date, notification_time, called_by, response, notes
@@ -227,6 +235,7 @@ function sendParentNotification($student, $visit_data, $db) {
         $notification_time = date('H:i:s');
         $response = 'Email Sent';
         $notes = 'Parent notified via email about clinic visit';
+        $called_by = $current_user_fullname; // FIXED: Use the full name from database
         
         $log_stmt->bindParam(':incident_id', $incident_id);
         $log_stmt->bindParam(':student_id', $student['student_id']);
@@ -235,7 +244,7 @@ function sendParentNotification($student, $visit_data, $db) {
         $log_stmt->bindParam(':emergency_email', $student['emergency_email']);
         $log_stmt->bindParam(':notification_date', $notification_date);
         $log_stmt->bindParam(':notification_time', $notification_time);
-        $log_stmt->bindParam(':called_by', $current_user_name);
+        $log_stmt->bindParam(':called_by', $called_by); // FIXED: Now has a value
         $log_stmt->bindParam(':response', $response);
         $log_stmt->bindParam(':notes', $notes);
         $log_stmt->execute();
@@ -244,6 +253,9 @@ function sendParentNotification($student, $visit_data, $db) {
         
     } catch (Exception $e) {
         error_log("Email notification failed: " . $e->getMessage());
+        return false;
+    } catch (PDOException $e) {
+        error_log("Database error in notification logging: " . $e->getMessage());
         return false;
     }
 }
@@ -365,7 +377,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             
             // Send email notification to parent
             if ($student_data_for_notification && !empty($student_data_for_notification['emergency_email'])) {
-                $email_sent = sendParentNotification($student_data_for_notification, $_POST, $db);
+                $email_sent = sendParentNotification($student_data_for_notification, $_POST, $db, $current_user_id, $current_user_fullname);
                 if ($email_sent) {
                     $success_message = "Clinic visit logged successfully! Parent notification sent to " . $student_data_for_notification['emergency_email'];
                 } else {
@@ -1626,7 +1638,22 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                             <?php endif; ?>
                             
                             <!-- Emergency Contact Info -->
-                           
+                            <?php if (!empty($student_data['emergency_contact']) || !empty($student_data['emergency_phone']) || !empty($student_data['emergency_email'])): ?>
+                            <div class="emergency-contact-info">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 16.92v3a1.999 1.999 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8 10a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+                                </svg>
+                                <span>
+                                    <strong>Emergency Contact:</strong> 
+                                    <?php echo htmlspecialchars($student_data['emergency_contact'] ?? 'N/A'); ?> | 
+                                    <?php echo htmlspecialchars($student_data['emergency_phone'] ?? 'No phone'); ?>
+                                    <?php if (!empty($student_data['emergency_email'])): ?>
+                                        <br>📧 <?php echo htmlspecialchars($student_data['emergency_email']); ?>
+                                        <span style="color: #2e7d32;">(Parent will be notified via email)</span>
+                                    <?php endif; ?>
+                                </span>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
 
