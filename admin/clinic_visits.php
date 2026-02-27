@@ -1,6 +1,11 @@
 <?php
 session_start();
 require_once '../config/database.php';
+require_once '../vendor/autoload.php'; // For PHPMailer
+
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+use PHPMailer\PHPMailer\SMTP;
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
@@ -21,6 +26,36 @@ $search_error = '';
 $student_id_search = isset($_GET['student_id']) ? $_GET['student_id'] : '';
 $success_message = '';
 $error_message = '';
+$show_verification_modal = false;
+
+// Check if verification was completed
+if (isset($_SESSION['verified_student_id']) && $_SESSION['verified_student_id'] === $student_id_search) {
+    $show_verification_modal = false;
+} elseif (!empty($student_id_search) && !isset($_POST['action'])) {
+    $show_verification_modal = true;
+}
+
+// Handle verification submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['verify_access'])) {
+    $user_id = $_SESSION['user_id'];
+    $password = $_POST['password'];
+    
+    // Verify password
+    $query = "SELECT password FROM users WHERE id = :user_id";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':user_id', $user_id);
+    $stmt->execute();
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($user && password_verify($password, $user['password'])) {
+        $_SESSION['verified_student_id'] = $_POST['student_id'];
+        header("Location: " . strtok($_SERVER["REQUEST_URI"], '?') . "?student_id=" . urlencode($_POST['student_id']));
+        exit();
+    } else {
+        $verification_error = "Invalid password. Access denied.";
+        $show_verification_modal = true;
+    }
+}
 
 // Get clinic stock for dropdown
 function getClinicStock($db) {
@@ -36,6 +71,182 @@ function getClinicStock($db) {
 }
 
 $clinic_stock = getClinicStock($db);
+
+// Function to send parent notification email
+function sendParentNotification($student, $visit_data, $db) {
+    try {
+        // Check if student has emergency contact email
+        if (empty($student['emergency_email'])) {
+            error_log("No emergency email found for student: " . $student['student_id']);
+            return false;
+        }
+
+        // Get clinic staff info
+        $staff_query = "SELECT full_name, email FROM users WHERE id = :user_id";
+        $staff_stmt = $db->prepare($staff_query);
+        $staff_stmt->bindParam(':user_id', $_SESSION['user_id']);
+        $staff_stmt->execute();
+        $staff = $staff_stmt->fetch(PDO::FETCH_ASSOC);
+
+        $mail = new PHPMailer(true);
+
+        // Server settings
+        $mail->isSMTP();
+        $mail->Host       = 'smtp.gmail.com'; // Your SMTP server
+        $mail->SMTPAuth   = true;
+        $mail->Username   = 'Stephenviray12@gmail.com'; // Your email
+        $mail->Password   = 'bubr nckn tgqf lvus'; // Your app password
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port       = 587;
+
+        // Recipients
+        $mail->setFrom('icare@gmail.com', 'MedFlow Clinic');
+        $mail->addAddress($student['emergency_email'], $student['emergency_contact'] ?? 'Parent/Guardian');
+        $mail->addReplyTo($staff['email'] ?? 'icare@gmail.com', $staff['full_name'] ?? 'Clinic Staff');
+
+        // Content
+        $mail->isHTML(true);
+        $mail->Subject = 'Clinic Visit Notification - ' . $student['full_name'];
+        
+        // Build email body
+        $body = "
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: #191970; color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; }
+                .content { background: #f5f5f5; padding: 30px; border-radius: 0 0 10px 10px; }
+                .info-box { background: white; padding: 15px; margin: 15px 0; border-left: 4px solid #191970; border-radius: 5px; }
+                .label { font-weight: bold; color: #191970; }
+                .vital-sign { display: inline-block; background: #eceff1; padding: 5px 10px; margin: 2px; border-radius: 15px; font-size: 0.9em; }
+                .footer { margin-top: 30px; font-size: 0.9em; color: #666; text-align: center; }
+            </style>
+        </head>
+        <body>
+            <div class='container'>
+                <div class='header'>
+                    <h2>🏥 MedFlow Clinic - Visit Notification</h2>
+                </div>
+                <div class='content'>
+                    <p>Dear <strong>" . htmlspecialchars($student['emergency_contact'] ?? 'Parent/Guardian') . "</strong>,</p>
+                    
+                    <p>This is to inform you that <strong>" . htmlspecialchars($student['full_name']) . "</strong> visited the school clinic today. Here are the details:</p>
+                    
+                    <div class='info-box'>
+                        <h3 style='margin-top: 0; color: #191970;'>Student Information</h3>
+                        <p><span class='label'>Student ID:</span> " . htmlspecialchars($student['student_id']) . "</p>
+                        <p><span class='label'>Full Name:</span> " . htmlspecialchars($student['full_name']) . "</p>
+                        <p><span class='label'>Grade & Section:</span> Grade " . htmlspecialchars($student['year_level'] ?? 'N/A') . " - " . htmlspecialchars($student['section'] ?? 'N/A') . "</p>
+                    </div>
+                    
+                    <div class='info-box'>
+                        <h3 style='margin-top: 0; color: #191970;'>Visit Details</h3>
+                        <p><span class='label'>Date & Time:</span> " . date('F d, Y', strtotime($visit_data['visit_date'])) . " at " . date('h:i A', strtotime($visit_data['visit_time'])) . "</p>
+                        <p><span class='label'>Chief Complaint:</span> " . htmlspecialchars($visit_data['complaint']) . "</p>
+                    </div>";
+        
+        // Add vital signs if available
+        if (!empty($visit_data['temperature']) || !empty($visit_data['blood_pressure']) || !empty($visit_data['heart_rate'])) {
+            $body .= "<div class='info-box'>
+                        <h3 style='margin-top: 0; color: #191970;'>Vital Signs</h3>
+                        <div>";
+            if (!empty($visit_data['temperature'])) {
+                $body .= "<span class='vital-sign'>🌡️ Temperature: " . htmlspecialchars($visit_data['temperature']) . "°C</span> ";
+            }
+            if (!empty($visit_data['blood_pressure'])) {
+                $body .= "<span class='vital-sign'>❤️ Blood Pressure: " . htmlspecialchars($visit_data['blood_pressure']) . "</span> ";
+            }
+            if (!empty($visit_data['heart_rate'])) {
+                $body .= "<span class='vital-sign'>💓 Heart Rate: " . htmlspecialchars($visit_data['heart_rate']) . " bpm</span>";
+            }
+            $body .= "    </div>
+                    </div>";
+        }
+        
+        $body .= "<div class='info-box'>
+                        <h3 style='margin-top: 0; color: #191970;'>Assessment & Treatment</h3>
+                        <p><span class='label'>Assessment Notes:</span> " . nl2br(htmlspecialchars($visit_data['notes'] ?? 'None')) . "</p>
+                        <p><span class='label'>Treatment Given:</span> " . nl2br(htmlspecialchars($visit_data['treatment_given'])) . "</p>
+                        <p><span class='label'>Disposition:</span> <strong>" . htmlspecialchars($visit_data['disposition']) . "</strong></p>
+                    </div>";
+        
+        // Add items used if any
+        if (isset($_POST['items_used']) && is_array($_POST['items_used'])) {
+            $items_used_text = [];
+            foreach ($_POST['items_used'] as $index => $item_id) {
+                if (!empty($item_id) && isset($_POST['item_quantity'][$index]) && $_POST['item_quantity'][$index] > 0) {
+                    // Get item details from database
+                    $item_query = "SELECT item_name, category, unit FROM clinic_stock WHERE id = :id";
+                    $item_stmt = $db->prepare($item_query);
+                    $item_stmt->bindParam(':id', $item_id);
+                    $item_stmt->execute();
+                    $item = $item_stmt->fetch(PDO::FETCH_ASSOC);
+                    if ($item) {
+                        $items_used_text[] = $_POST['item_quantity'][$index] . " " . $item['unit'] . " of " . $item['item_name'];
+                    }
+                }
+            }
+            if (!empty($items_used_text)) {
+                $body .= "<div class='info-box'>
+                            <h3 style='margin-top: 0; color: #191970;'>Medicines/Supplies Used</h3>
+                            <p>" . implode(', ', $items_used_text) . "</p>
+                          </div>";
+            }
+        }
+        
+        $body .= "<p>If you have any questions or concerns, please don't hesitate to contact the school clinic.</p>
+                    
+                    <div class='footer'>
+                        <p>This is an automated notification from MedFlow Clinic Management System.<br>
+                        School Clinic Contact: (02) 1234-5678 | clinic@medflow.com</p>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>";
+        
+        $mail->Body = $body;
+        $mail->AltBody = strip_tags(str_replace(['<br>', '</p>'], ["\n", "\n\n"], $body));
+        
+        $mail->send();
+        
+        // Log notification
+        $log_query = "INSERT INTO parent_notifications (
+            incident_id, student_id, parent_name, contact_number, emergency_email,
+            notification_date, notification_time, called_by, response, notes
+        ) VALUES (
+            :incident_id, :student_id, :parent_name, :contact_number, :emergency_email,
+            :notification_date, :notification_time, :called_by, :response, :notes
+        )";
+        
+        $log_stmt = $db->prepare($log_query);
+        $incident_id = 0; // For visit notifications, we can use 0 or modify table structure
+        $notification_date = date('Y-m-d');
+        $notification_time = date('H:i:s');
+        $response = 'Email Sent';
+        $notes = 'Parent notified via email about clinic visit';
+        
+        $log_stmt->bindParam(':incident_id', $incident_id);
+        $log_stmt->bindParam(':student_id', $student['student_id']);
+        $log_stmt->bindParam(':parent_name', $student['emergency_contact']);
+        $log_stmt->bindParam(':contact_number', $student['emergency_phone']);
+        $log_stmt->bindParam(':emergency_email', $student['emergency_email']);
+        $log_stmt->bindParam(':notification_date', $notification_date);
+        $log_stmt->bindParam(':notification_time', $notification_time);
+        $log_stmt->bindParam(':called_by', $current_user_name);
+        $log_stmt->bindParam(':response', $response);
+        $log_stmt->bindParam(':notes', $notes);
+        $log_stmt->execute();
+        
+        return true;
+        
+    } catch (Exception $e) {
+        error_log("Email notification failed: " . $e->getMessage());
+        return false;
+    }
+}
 
 // Handle form submission for new visit
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
@@ -126,12 +337,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             }
             
             $db->commit();
-            $success_message = "Clinic visit logged successfully!";
             
-            // Refresh student data to show new visit
-            $student_id_search = $_POST['student_id'];
+            // Fetch student data for email notification
+            $student_data_for_notification = null;
             
-            // Fetch updated student data
+            // Fetch from API
             $api_url = "https://ttm.qcprotektado.com/api/students.php";
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -141,6 +351,34 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
             
+            if ($http_code == 200 && $response) {
+                $api_response = json_decode($response, true);
+                if (isset($api_response['records']) && is_array($api_response['records'])) {
+                    foreach ($api_response['records'] as $student) {
+                        if (isset($student['student_id']) && $student['student_id'] == $_POST['student_id']) {
+                            $student_data_for_notification = $student;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Send email notification to parent
+            if ($student_data_for_notification && !empty($student_data_for_notification['emergency_email'])) {
+                $email_sent = sendParentNotification($student_data_for_notification, $_POST, $db);
+                if ($email_sent) {
+                    $success_message = "Clinic visit logged successfully! Parent notification sent to " . $student_data_for_notification['emergency_email'];
+                } else {
+                    $success_message = "Clinic visit logged successfully! (Parent notification failed to send)";
+                }
+            } else {
+                $success_message = "Clinic visit logged successfully! (No emergency email found for parent notification)";
+            }
+            
+            // Refresh student data to show new visit
+            $student_id_search = $_POST['student_id'];
+            
+            // Fetch updated student data
             if ($http_code == 200 && $response) {
                 $api_response = json_decode($response, true);
                 if (isset($api_response['records']) && is_array($api_response['records'])) {
@@ -237,8 +475,8 @@ function getClinicVisits($db, $student_id) {
     }
 }
 
-// Search for student if ID provided (for new visit)
-if (!empty($student_id_search) && !isset($_POST['action'])) {
+// Search for student if ID provided and verified
+if (!empty($student_id_search) && isset($_SESSION['verified_student_id']) && $_SESSION['verified_student_id'] === $student_id_search && !isset($_POST['action'])) {
     $api_url = "https://ttm.qcprotektado.com/api/students.php";
     
     $ch = curl_init();
@@ -267,13 +505,23 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
             
             if (!$found) {
                 $search_error = "Student ID not found in the system.";
+                unset($_SESSION['verified_student_id']);
             }
         } else {
             $search_error = "Unable to fetch student data.";
+            unset($_SESSION['verified_student_id']);
         }
     } else {
         $search_error = "Error connecting to student database.";
+        unset($_SESSION['verified_student_id']);
     }
+} elseif (!empty($student_id_search) && (!isset($_SESSION['verified_student_id']) || $_SESSION['verified_student_id'] !== $student_id_search)) {
+    $show_verification_modal = true;
+}
+
+// Clear verification if no student ID
+if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
+    unset($_SESSION['verified_student_id']);
 }
 ?>
 <!DOCTYPE html>
@@ -341,6 +589,164 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
             color: #546e7a;
             font-size: 1rem;
             font-weight: 400;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-container {
+            background: white;
+            border-radius: 24px;
+            width: 90%;
+            max-width: 450px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            animation: slideUp 0.3s ease;
+        }
+
+        .modal-icon {
+            width: 70px;
+            height: 70px;
+            background: #191970;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            color: white;
+        }
+
+        .modal-icon svg {
+            width: 35px;
+            height: 35px;
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #191970;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .modal-subtitle {
+            color: #546e7a;
+            text-align: center;
+            margin-bottom: 25px;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .modal-form {
+            margin-top: 20px;
+        }
+
+        .modal-form .form-group {
+            margin-bottom: 20px;
+        }
+
+        .modal-form label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #546e7a;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .modal-form .form-control {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 1rem;
+            border: 2px solid #cfd8dc;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .modal-form .form-control:focus {
+            outline: none;
+            border-color: #191970;
+            box-shadow: 0 0 0 3px rgba(25, 25, 112, 0.1);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 25px;
+        }
+
+        .modal-btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .modal-btn.primary {
+            background: #191970;
+            color: white;
+        }
+
+        .modal-btn.primary:hover {
+            background: #24248f;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.2);
+        }
+
+        .modal-btn.secondary {
+            background: #eceff1;
+            color: #37474f;
+        }
+
+        .modal-btn.secondary:hover {
+            background: #cfd8dc;
+        }
+
+        .modal-error {
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            border-radius: 12px;
+            padding: 12px 16px;
+            color: #c62828;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* Stats Grid */
@@ -659,6 +1065,23 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
         .student-details p {
             color: #546e7a;
             font-size: 0.9rem;
+        }
+
+        .emergency-contact-info {
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: #fff3e0;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            color: #e65100;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .emergency-contact-info svg {
+            width: 16px;
+            height: 16px;
         }
 
         .vital-signs-grid {
@@ -1004,7 +1427,7 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
             <div class="dashboard-container">
                 <div class="welcome-section">
                     <h1>Clinic Visits & Consultation</h1>
-                    <p>Log and manage student clinic visits with medicine tracking.</p>
+                    <p>Log and manage student clinic visits with medicine tracking and parent notifications.</p>
                 </div>
 
                 <!-- Alert Messages -->
@@ -1201,6 +1624,24 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                                     ⚕️ Declared: <?php echo htmlspecialchars($student_data['medical_conditions']); ?>
                                 </p>
                             <?php endif; ?>
+                            
+                            <!-- Emergency Contact Info -->
+                            <?php if (!empty($student_data['emergency_contact']) || !empty($student_data['emergency_phone']) || !empty($student_data['emergency_email'])): ?>
+                            <div class="emergency-contact-info">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 16.92v3a1.999 1.999 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8 10a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+                                </svg>
+                                <span>
+                                    <strong>Emergency Contact:</strong> 
+                                    <?php echo htmlspecialchars($student_data['emergency_contact'] ?? 'N/A'); ?> | 
+                                    <?php echo htmlspecialchars($student_data['emergency_phone'] ?? 'No phone'); ?>
+                                    <?php if (!empty($student_data['emergency_email'])): ?>
+                                        <br>📧 <?php echo htmlspecialchars($student_data['emergency_email']); ?>
+                                        <span style="color: #2e7d32;">(Parent will be notified via email)</span>
+                                    <?php endif; ?>
+                                </span>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
 
@@ -1264,7 +1705,7 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                             <textarea name="notes" class="form-control" placeholder="e.g., Possible viral fever, Mild dehydration, Minor sprain..."></textarea>
                         </div>
 
-                        <!-- Items Used Section (NEW) -->
+                        <!-- Items Used Section -->
                         <div class="items-section">
                             <div class="items-header">
                                 <h3>💊 Medicines / Supplies Used</h3>
@@ -1308,7 +1749,7 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                         </div>
 
                         <button type="submit" class="btn btn-primary" style="margin-top: 10px;" onclick="return validateItems()">
-                            Save Clinic Visit
+                            Save Clinic Visit & Notify Parent
                         </button>
                     </form>
                 </div>
@@ -1446,6 +1887,68 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
             </div>
         </div>
     </div>
+
+    <!-- Security Verification Modal -->
+    <?php if ($show_verification_modal && !empty($student_id_search)): ?>
+    <div class="modal-overlay" id="verificationModal">
+        <div class="modal-container">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+            </div>
+            <h2 class="modal-title">Secure Access Required</h2>
+            <p class="modal-subtitle">
+                You are accessing confidential medical records for<br>
+                <strong>Student ID: <?php echo htmlspecialchars($student_id_search); ?></strong>
+            </p>
+            
+            <?php if (isset($verification_error)): ?>
+                <div class="modal-error">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <?php echo $verification_error; ?>
+                </div>
+            <?php endif; ?>
+            
+            <form method="POST" action="" class="modal-form">
+                <input type="hidden" name="student_id" value="<?php echo htmlspecialchars($student_id_search); ?>">
+                <div class="form-group">
+                    <label for="password">Enter Your Password to Continue</label>
+                    <input type="password" class="form-control" id="password" name="password" 
+                           placeholder="••••••••" required autofocus>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn secondary" onclick="cancelAccess()">Cancel</button>
+                    <button type="submit" name="verify_access" class="modal-btn primary">Verify & Access</button>
+                </div>
+            </form>
+            <p style="text-align: center; margin-top: 20px; font-size: 0.8rem; color: #78909c;">
+                This helps us maintain confidentiality of student records
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        // Prevent background scrolling when modal is open
+        document.body.style.overflow = 'hidden';
+        
+        function cancelAccess() {
+            window.location.href = window.location.pathname; // Redirect to same page without query string
+        }
+        
+        // Close modal when clicking outside
+        document.getElementById('verificationModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                cancelAccess();
+            }
+        });
+    </script>
+    <?php endif; ?>
 
     <!-- Template for item row -->
     <template id="item-row-template">
