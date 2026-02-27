@@ -102,8 +102,8 @@ function sendParentNotification($student, $visit_data, $db, $current_user_id, $c
         $mail->isSMTP();
         $mail->Host       = 'smtp.gmail.com'; // Your SMTP server
         $mail->SMTPAuth   = true;
-        $mail->Username   = 'your-email@gmail.com'; // Your email
-        $mail->Password   = 'your-app-password'; // Your app password
+        $mail->Username   = 'Stephenviray12@gmail.com'; // Your email
+        $mail->Password   = 'bubr nckn tgqf lvus'; // Your app password
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
 
