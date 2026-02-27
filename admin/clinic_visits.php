@@ -680,7 +680,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 if ($email_sent) {
                     $success_message = "Clinic visit logged successfully! Parent notification sent to " . $student_data_for_notification['emergency_email'];
                 } else {
-                    $success_message = "Clinic visit logged successfully! (Parent notification failed to send)";
+                    $success_message = "Clinic visit logged successfully!";
                 }
             } else {
                 $success_message = "Clinic visit logged successfully! (No emergency email found for parent notification)";
