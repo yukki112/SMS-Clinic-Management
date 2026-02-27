@@ -52,6 +52,7 @@ else if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
     else if ($action == 'release') {
         $id = $input['id'] ?? 0;
+        $expiry_date = $input['expiry_date'] ?? null; // Get expiry date from request
         
         if (!$id) {
             echo json_encode(['success' => false, 'error' => 'ID required']);
@@ -83,18 +84,19 @@ else if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $stmt->execute([$id]);
             
             if ($stmt->rowCount() == 0) {
-                // Add to clinic stock
+                // Add to clinic stock WITH expiry date
                 $insert = "INSERT INTO clinic_stock 
-                          (item_code, item_name, category, quantity, unit, date_received, received_from, request_id) 
-                          VALUES (?, ?, ?, ?, ?, CURDATE(), ?, ?)";
+                          (item_code, item_name, category, quantity, unit, expiry_date, date_received, received_from, request_id) 
+                          VALUES (?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)";
                 
                 $stmt = $db->prepare($insert);
                 $stmt->execute([
                     $request['item_code'],
                     $request['item_name'],
                     $request['category'],
-                    $request['quantity_requested'], // Use the quantity
+                    $request['quantity_requested'],
                     $request['unit'] ?? ($request['category'] == 'Medicine' ? 'tablet' : 'piece'),
+                    $expiry_date, // Use the expiry date passed from custodian
                     'Property Custodian',
                     $id
                 ]);
