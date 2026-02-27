@@ -1932,7 +1932,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                             </svg>
                                             <span class="email-badge">
                                                 <?php echo htmlspecialchars($student_data['emergency_email']); ?>
-                                                (Parent will be notified via email)
+                                                
                                             </span>
                                         </div>
                                     <?php endif; ?>
@@ -2200,7 +2200,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                             <polyline points="22,6 12,13 2,6"/>
                                         </svg>
                                         <strong><?php echo htmlspecialchars($student_data['emergency_email']); ?></strong>
-                                        <span style="font-size: 0.85rem; color: #1e40af;">(Parent will be notified via email)</span>
+                                        <span style="font-size: 0.85rem; color: #1e40af;"></span>
                                     </div>
                                 </div>
                             <?php endif; ?>
