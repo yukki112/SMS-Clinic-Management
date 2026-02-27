@@ -32,91 +32,12 @@ $search_error = '';
 $student_id_search = isset($_GET['student_id']) ? $_GET['student_id'] : '';
 $success_message = '';
 $error_message = '';
-$generated_clearance_id = isset($_GET['generated']) ? intval($_GET['generated']) : 0;
-$show_print_modal = false;
-
-// Create clearance tables if not exists
-try {
-    // Clearance requests table
-    $db->exec("CREATE TABLE IF NOT EXISTS `clearance_requests` (
-        `id` int(11) NOT NULL AUTO_INCREMENT,
-        `clearance_code` varchar(50) NOT NULL,
-        `student_id` varchar(20) NOT NULL,
-        `student_name` varchar(100) NOT NULL,
-        `grade_section` varchar(50) DEFAULT NULL,
-        `clearance_type` enum('Sports','Event','Work Immersion','After Illness','After Hospitalization','After Injury','General') NOT NULL,
-        `purpose` text NOT NULL,
-        `request_date` date NOT NULL,
-        `status` enum('Pending','Approved','Not Cleared','Expired') DEFAULT 'Approved',
-        `approved_date` date DEFAULT NULL,
-        `approved_by` varchar(100) DEFAULT NULL,
-        `remarks` text DEFAULT NULL,
-        `valid_until` date DEFAULT NULL,
-        `created_by` int(11) NOT NULL,
-        `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-        PRIMARY KEY (`id`),
-        UNIQUE KEY `clearance_code` (`clearance_code`),
-        KEY `student_id` (`student_id`),
-        KEY `status` (`status`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
-
-    // Medical certificates table
-    $db->exec("CREATE TABLE IF NOT EXISTS `medical_certificates` (
-        `id` int(11) NOT NULL AUTO_INCREMENT,
-        `certificate_code` varchar(50) NOT NULL,
-        `student_id` varchar(20) NOT NULL,
-        `student_name` varchar(100) NOT NULL,
-        `grade_section` varchar(50) DEFAULT NULL,
-        `certificate_type` enum('Fit to Return','Fit for PE','Fit for Activities','Medical Leave','General') NOT NULL,
-        `issued_date` date NOT NULL,
-        `valid_until` date DEFAULT NULL,
-        `findings` text DEFAULT NULL,
-        `recommendations` text DEFAULT NULL,
-        `restrictions` text DEFAULT NULL,
-        `issued_by` varchar(100) NOT NULL,
-        `issuer_id` int(11) NOT NULL,
-        `remarks` text DEFAULT NULL,
-        `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-        PRIMARY KEY (`id`),
-        UNIQUE KEY `certificate_code` (`certificate_code`),
-        KEY `student_id` (`student_id`),
-        KEY `certificate_type` (`certificate_type`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
-
-    // Fit-to-return slips table
-    $db->exec("CREATE TABLE IF NOT EXISTS `fit_to_return_slips` (
-        `id` int(11) NOT NULL AUTO_INCREMENT,
-        `slip_code` varchar(50) NOT NULL,
-        `student_id` varchar(20) NOT NULL,
-        `student_name` varchar(100) NOT NULL,
-        `grade_section` varchar(50) DEFAULT NULL,
-        `absence_days` int(11) DEFAULT NULL,
-        `absence_reason` text DEFAULT NULL,
-        `assessment_date` date NOT NULL,
-        `temperature` decimal(4,2) DEFAULT NULL,
-        `blood_pressure` varchar(10) DEFAULT NULL,
-        `heart_rate` int(11) DEFAULT NULL,
-        `findings` text DEFAULT NULL,
-        `fit_to_return` enum('Yes','No','With Restrictions') DEFAULT 'Yes',
-        `restrictions` text DEFAULT NULL,
-        `recommended_rest_days` int(11) DEFAULT NULL,
-        `next_checkup_date` date DEFAULT NULL,
-        `issued_by` varchar(100) NOT NULL,
-        `issuer_id` int(11) NOT NULL,
-        `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-        PRIMARY KEY (`id`),
-        UNIQUE KEY `slip_code` (`slip_code`),
-        KEY `student_id` (`student_id`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
-
-} catch (PDOException $e) {
-    error_log("Error creating tables: " . $e->getMessage());
-}
+$generated_pdf = '';
 
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
     
-    // Create clearance request (auto-approved for walk-in)
+    // Create clearance request
     if ($_POST['action'] == 'create_clearance') {
         try {
             // Generate clearance code
@@ -125,17 +46,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $random = rand(1000, 9999);
             $clearance_code = $prefix . '-' . $date . '-' . $random;
             
-            $valid_until = !empty($_POST['valid_until']) ? $_POST['valid_until'] : date('Y-m-d', strtotime('+1 year'));
-            $approved_date = date('Y-m-d');
+            $valid_until = !empty($_POST['valid_until']) ? $_POST['valid_until'] : null;
             
             $query = "INSERT INTO clearance_requests (
                 clearance_code, student_id, student_name, grade_section,
-                clearance_type, purpose, request_date, status, 
-                approved_date, approved_by, valid_until, created_by
+                clearance_type, purpose, request_date, status, valid_until, created_by
             ) VALUES (
                 :clearance_code, :student_id, :student_name, :grade_section,
-                :clearance_type, :purpose, :request_date, 'Approved',
-                :approved_date, :approved_by, :valid_until, :created_by
+                :clearance_type, :purpose, :request_date, 'Pending', :valid_until, :created_by
             )";
             
             $stmt = $db->prepare($query);
@@ -146,20 +64,51 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $stmt->bindParam(':clearance_type', $_POST['clearance_type']);
             $stmt->bindParam(':purpose', $_POST['purpose']);
             $stmt->bindParam(':request_date', $_POST['request_date']);
-            $stmt->bindParam(':approved_date', $approved_date);
-            $stmt->bindParam(':approved_by', $current_user_fullname);
             $stmt->bindParam(':valid_until', $valid_until);
             $stmt->bindParam(':created_by', $current_user_id);
             
             if ($stmt->execute()) {
                 $clearance_id = $db->lastInsertId();
-                $success_message = "Clearance generated successfully! Code: " . $clearance_code;
+                $success_message = "Clearance request created successfully! Code: " . $clearance_code;
                 
-                // Redirect to PDF generation
-                header('Location: generate_clearance.php?id=' . $clearance_id);
-                exit();
+                // Automatically generate PDF
+                $generated_pdf = 'generate_clearance.php?id=' . $clearance_id;
+                
+                // Show success with PDF link
+                $success_message .= ' <a href="' . $generated_pdf . '" target="_blank" style="color: white; background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 5px; text-decoration: none; margin-left: 10px;">📄 Download Clearance Form</a>';
             } else {
                 $error_message = "Error creating clearance request.";
+            }
+        } catch (PDOException $e) {
+            $error_message = "Database error: " . $e->getMessage();
+        }
+    }
+    
+    // Update clearance status
+    if ($_POST['action'] == 'update_clearance') {
+        try {
+            $approved_date = ($_POST['status'] == 'Approved' || $_POST['status'] == 'Not Cleared') ? date('Y-m-d') : null;
+            
+            $query = "UPDATE clearance_requests 
+                      SET status = :status, 
+                          approved_date = :approved_date, 
+                          approved_by = :approved_by, 
+                          remarks = :remarks,
+                          valid_until = :valid_until
+                      WHERE id = :id";
+            
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':status', $_POST['status']);
+            $stmt->bindParam(':approved_date', $approved_date);
+            $stmt->bindParam(':approved_by', $current_user_fullname);
+            $stmt->bindParam(':remarks', $_POST['remarks']);
+            $stmt->bindParam(':valid_until', $_POST['valid_until']);
+            $stmt->bindParam(':id', $_POST['clearance_id']);
+            
+            if ($stmt->execute()) {
+                $success_message = "Clearance status updated successfully!";
+            } else {
+                $error_message = "Error updating clearance status.";
             }
         } catch (PDOException $e) {
             $error_message = "Database error: " . $e->getMessage();
@@ -206,9 +155,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 $certificate_id = $db->lastInsertId();
                 $success_message = "Medical certificate issued successfully! Code: " . $certificate_code;
                 
-                // Redirect to PDF generation
-                header('Location: generate_certificate.php?id=' . $certificate_id);
-                exit();
+                // Automatically generate PDF if requested
+                if (isset($_POST['generate_pdf']) && $_POST['generate_pdf'] == 'yes') {
+                    $generated_pdf = 'generate_certificate.php?id=' . $certificate_id;
+                    $success_message .= ' <a href="' . $generated_pdf . '" target="_blank" style="color: white; background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 5px; text-decoration: none; margin-left: 10px;">📄 Download Certificate</a>';
+                }
             } else {
                 $error_message = "Error issuing medical certificate.";
             }
@@ -265,9 +216,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 $slip_id = $db->lastInsertId();
                 $success_message = "Fit-to-return slip created successfully! Code: " . $slip_code;
                 
-                // Redirect to PDF generation
-                header('Location: generate_fit_to_return.php?id=' . $slip_id);
-                exit();
+                // Automatically generate PDF if requested
+                if (isset($_POST['generate_pdf']) && $_POST['generate_pdf'] == 'yes') {
+                    $generated_pdf = 'generate_fit_to_return.php?id=' . $slip_id;
+                    $success_message .= ' <a href="' . $generated_pdf . '" target="_blank" style="color: white; background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 5px; text-decoration: none; margin-left: 10px;">📄 Download Slip</a>';
+                }
             } else {
                 $error_message = "Error creating fit-to-return slip.";
             }
@@ -281,11 +234,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
 $stats = [];
 
 try {
-    // Clearances issued today
-    $query = "SELECT COUNT(*) as total FROM clearance_requests WHERE DATE(request_date) = CURDATE()";
+    // Pending clearances
+    $query = "SELECT COUNT(*) as total FROM clearance_requests WHERE status = 'Pending'";
     $stmt = $db->query($query);
     $result = $stmt->fetch(PDO::FETCH_ASSOC);
-    $stats['clearances_today'] = $result ? $result['total'] : 0;
+    $stats['pending_clearances'] = $result ? $result['total'] : 0;
+    
+    // Approved clearances this month
+    $query = "SELECT COUNT(*) as total FROM clearance_requests 
+              WHERE status = 'Approved' AND MONTH(approved_date) = MONTH(CURDATE())";
+    $stmt = $db->query($query);
+    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stats['approved_this_month'] = $result ? $result['total'] : 0;
     
     // Certificates issued today
     $query = "SELECT COUNT(*) as total FROM medical_certificates WHERE DATE(issued_date) = CURDATE()";
@@ -299,32 +259,38 @@ try {
     $result = $stmt->fetch(PDO::FETCH_ASSOC);
     $stats['fit_to_return_today'] = $result ? $result['total'] : 0;
     
-    // Active clearances
+    // Expiring soon clearances
     $query = "SELECT COUNT(*) as total FROM clearance_requests 
-              WHERE status = 'Approved' 
-              AND (valid_until IS NULL OR valid_until >= CURDATE())";
+              WHERE valid_until IS NOT NULL 
+              AND valid_until BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)";
     $stmt = $db->query($query);
     $result = $stmt->fetch(PDO::FETCH_ASSOC);
-    $stats['active_clearances'] = $result ? $result['total'] : 0;
+    $stats['expiring_soon'] = $result ? $result['total'] : 0;
     
 } catch (PDOException $e) {
     error_log("Error fetching stats: " . $e->getMessage());
     $stats = [
-        'clearances_today' => 0,
+        'pending_clearances' => 0,
+        'approved_this_month' => 0,
         'certificates_today' => 0,
         'fit_to_return_today' => 0,
-        'active_clearances' => 0
+        'expiring_soon' => 0
     ];
 }
 
-// Get recent clearances
-function getRecentClearances($db, $limit = 10) {
+// Get all clearance requests
+function getClearanceRequests($db, $status = null) {
     try {
-        $query = "SELECT * FROM clearance_requests 
-                  ORDER BY request_date DESC 
-                  LIMIT :limit";
+        $query = "SELECT * FROM clearance_requests";
+        if ($status) {
+            $query .= " WHERE status = :status";
+        }
+        $query .= " ORDER BY request_date DESC LIMIT 50";
+        
         $stmt = $db->prepare($query);
-        $stmt->bindParam(':limit', $limit, PDO::PARAM_INT);
+        if ($status) {
+            $stmt->bindParam(':status', $status);
+        }
         $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
@@ -332,7 +298,50 @@ function getRecentClearances($db, $limit = 10) {
     }
 }
 
-$recent_clearances = getRecentClearances($db);
+// Get medical certificates
+function getMedicalCertificates($db, $student_id = null) {
+    try {
+        $query = "SELECT * FROM medical_certificates";
+        if ($student_id) {
+            $query .= " WHERE student_id = :student_id";
+        }
+        $query .= " ORDER BY issued_date DESC LIMIT 50";
+        
+        $stmt = $db->prepare($query);
+        if ($student_id) {
+            $stmt->bindParam(':student_id', $student_id);
+        }
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        return [];
+    }
+}
+
+// Get fit-to-return slips
+function getFitToReturnSlips($db, $student_id = null) {
+    try {
+        $query = "SELECT * FROM fit_to_return_slips";
+        if ($student_id) {
+            $query .= " WHERE student_id = :student_id";
+        }
+        $query .= " ORDER BY assessment_date DESC LIMIT 50";
+        
+        $stmt = $db->prepare($query);
+        if ($student_id) {
+            $stmt->bindParam(':student_id', $student_id);
+        }
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        return [];
+    }
+}
+
+$pending_clearances = getClearanceRequests($db, 'Pending');
+$approved_clearances = getClearanceRequests($db, 'Approved');
+$all_certificates = getMedicalCertificates($db);
+$all_fit_to_return = getFitToReturnSlips($db);
 
 // Search for student if ID provided
 if (!empty($student_id_search)) {
@@ -357,6 +366,11 @@ if (!empty($student_id_search)) {
                 if (isset($student['student_id']) && $student['student_id'] == $student_id_search) {
                     $student_data = $student;
                     $found = true;
+                    
+                    // Get student's clearance history
+                    $student_data['clearances'] = getClearanceRequests($db);
+                    $student_data['certificates'] = getMedicalCertificates($db, $student_id_search);
+                    $student_data['fit_to_return'] = getFitToReturnSlips($db, $student_id_search);
                     break;
                 }
             }
@@ -444,7 +458,7 @@ if (!empty($student_id_search)) {
         /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(5, 1fr);
             gap: 20px;
             margin-bottom: 30px;
             animation: fadeInUp 0.6s ease;
@@ -499,6 +513,17 @@ if (!empty($student_id_search)) {
             letter-spacing: 0.5px;
         }
 
+        .warning-badge {
+            background: #fde7e9;
+            color: #c44545;
+            padding: 4px 8px;
+            border-radius: 30px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            display: inline-block;
+            margin-top: 4px;
+        }
+
         /* Alert Messages */
         .alert {
             padding: 16px 20px;
@@ -516,6 +541,21 @@ if (!empty($student_id_search)) {
             color: #1e7b5c;
         }
 
+        .alert-success a {
+            color: white;
+            background: #1e7b5c;
+            padding: 5px 10px;
+            border-radius: 5px;
+            text-decoration: none;
+            display: inline-block;
+            margin-left: 10px;
+            font-weight: 500;
+        }
+
+        .alert-success a:hover {
+            background: #155d45;
+        }
+
         .alert-error {
             background: #fde7e9;
             border: 1px solid #fbc1c6;
@@ -526,107 +566,6 @@ if (!empty($student_id_search)) {
             from {
                 opacity: 0;
                 transform: translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        /* Print Modal */
-        .print-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
-            animation: fadeIn 0.3s ease;
-        }
-
-        .print-modal-content {
-            background: white;
-            border-radius: 24px;
-            padding: 40px;
-            max-width: 400px;
-            width: 90%;
-            text-align: center;
-            animation: slideUp 0.3s ease;
-        }
-
-        .print-icon {
-            width: 80px;
-            height: 80px;
-            background: linear-gradient(135deg, #6b2b5e 0%, #a14a76 100%);
-            border-radius: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 20px;
-            color: white;
-            font-size: 40px;
-        }
-
-        .print-modal h3 {
-            color: #6b2b5e;
-            margin-bottom: 10px;
-            font-size: 1.5rem;
-        }
-
-        .print-modal p {
-            color: #7a4b6b;
-            margin-bottom: 25px;
-        }
-
-        .print-buttons {
-            display: flex;
-            gap: 15px;
-        }
-
-        .print-btn {
-            flex: 1;
-            padding: 14px;
-            border: none;
-            border-radius: 12px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .print-btn-primary {
-            background: linear-gradient(135deg, #6b2b5e 0%, #a14a76 100%);
-            color: white;
-        }
-
-        .print-btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(107, 43, 94, 0.3);
-        }
-
-        .print-btn-secondary {
-            background: #f0e2ea;
-            color: #6b2b5e;
-            border: 1px solid #e9d0df;
-        }
-
-        .print-btn-secondary:hover {
-            background: #e9d0df;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        @keyframes slideUp {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
             }
             to {
                 opacity: 1;
@@ -676,9 +615,24 @@ if (!empty($student_id_search)) {
             font-weight: 600;
         }
 
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
         .status-approved {
             background: #d4edda;
             color: #1e7b5c;
+        }
+
+        .status-not-cleared {
+            background: #fde7e9;
+            color: #c44545;
+        }
+
+        .status-expired {
+            background: #e9ecef;
+            color: #6c757d;
         }
 
         .search-form {
@@ -735,6 +689,12 @@ if (!empty($student_id_search)) {
             gap: 12px;
         }
 
+        .form-row-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+        }
+
         .btn {
             padding: 12px 24px;
             border: none;
@@ -771,6 +731,14 @@ if (!empty($student_id_search)) {
             font-size: 0.8rem;
         }
 
+        .btn-icon {
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
         /* Quick Stats Card */
         .quick-stats-card {
             background: white;
@@ -778,6 +746,112 @@ if (!empty($student_id_search)) {
             padding: 24px;
             box-shadow: 0 4px 6px -1px rgba(107, 43, 94, 0.1), 0 2px 4px -1px rgba(107, 43, 94, 0.06);
             border: 1px solid #e9d0df;
+        }
+
+        .pending-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .pending-item {
+            padding: 12px 0;
+            border-bottom: 1px solid #f0e2ea;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pending-item:last-child {
+            border-bottom: none;
+        }
+
+        .pending-info {
+            flex: 1;
+        }
+
+        .pending-name {
+            font-weight: 600;
+            color: #6b2b5e;
+            font-size: 0.9rem;
+        }
+
+        .pending-meta {
+            font-size: 0.7rem;
+            color: #a14a76;
+            display: flex;
+            gap: 10px;
+            margin-top: 4px;
+        }
+
+        .pending-badge {
+            background: #fff3cd;
+            color: #856404;
+            padding: 4px 8px;
+            border-radius: 30px;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+
+        /* Tabs */
+        .tabs-section {
+            background: white;
+            border-radius: 24px;
+            box-shadow: 0 10px 15px -3px rgba(107, 43, 94, 0.1), 0 4px 6px -2px rgba(107, 43, 94, 0.05);
+            border: 1px solid #e9d0df;
+            overflow: hidden;
+            margin-bottom: 30px;
+            animation: fadeInUp 0.8s ease;
+        }
+
+        .tabs-header {
+            display: flex;
+            border-bottom: 2px solid #f0e2ea;
+            background: #fdf8fa;
+            overflow-x: auto;
+            padding: 0 20px;
+        }
+
+        .tab-btn {
+            padding: 16px 24px;
+            background: none;
+            border: none;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #7a4b6b;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            white-space: nowrap;
+        }
+
+        .tab-btn:hover {
+            color: #a14a76;
+        }
+
+        .tab-btn.active {
+            color: #a14a76;
+        }
+
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #a14a76;
+        }
+
+        .tab-content {
+            padding: 30px;
+        }
+
+        .tab-pane {
+            display: none;
+        }
+
+        .tab-pane.active {
+            display: block;
         }
 
         /* Form Cards */
@@ -842,16 +916,7 @@ if (!empty($student_id_search)) {
             font-size: 0.95rem;
         }
 
-        /* Recent Clearances Table */
-        .recent-section {
-            background: white;
-            border-radius: 20px;
-            padding: 24px;
-            margin-top: 30px;
-            box-shadow: 0 4px 6px -1px rgba(107, 43, 94, 0.1), 0 2px 4px -1px rgba(107, 43, 94, 0.06);
-            border: 1px solid #e9d0df;
-        }
-
+        /* Tables */
         .table-wrapper {
             overflow-x: auto;
             border-radius: 16px;
@@ -895,6 +960,25 @@ if (!empty($student_id_search)) {
         .action-buttons {
             display: flex;
             gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .pdf-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: #f0e2ea;
+            color: #6b2b5e;
+            padding: 4px 8px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+
+        .pdf-link:hover {
+            background: #a14a76;
+            color: white;
         }
 
         .empty-state {
@@ -922,17 +1006,25 @@ if (!empty($student_id_search)) {
             color: #7a4b6b;
         }
 
-        .print-link {
-            color: #a14a76;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 0.85rem;
+        /* PDF Options */
+        .pdf-option {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f0e2ea;
+            border-radius: 12px;
+            border: 1px solid #e9d0df;
         }
 
-        .print-link:hover {
-            text-decoration: underline;
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #a14a76;
         }
 
         @keyframes fadeInUp {
@@ -952,7 +1044,7 @@ if (!empty($student_id_search)) {
             }
             
             .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: repeat(3, 1fr);
             }
         }
 
@@ -963,10 +1055,11 @@ if (!empty($student_id_search)) {
             }
             
             .stats-grid {
-                grid-template-columns: 1fr;
+                grid-template-columns: repeat(2, 1fr);
             }
             
-            .form-row {
+            .form-row,
+            .form-row-3 {
                 grid-template-columns: 1fr;
             }
             
@@ -976,10 +1069,6 @@ if (!empty($student_id_search)) {
             }
             
             .action-buttons {
-                flex-direction: column;
-            }
-
-            .print-buttons {
                 flex-direction: column;
             }
         }
@@ -995,7 +1084,7 @@ if (!empty($student_id_search)) {
             <div class="dashboard-container">
                 <div class="welcome-section">
                     <h1>📋 Health Clearance & Certification</h1>
-                    <p>Generate instant clearances for walk-in students. Print immediately.</p>
+                    <p>Create clearance requests, issue medical certificates, and generate fit-to-return slips.</p>
                 </div>
 
                 <!-- Alert Messages -->
@@ -1023,10 +1112,18 @@ if (!empty($student_id_search)) {
                 <!-- Stats Grid -->
                 <div class="stats-grid">
                     <div class="stat-card">
-                        <div class="stat-icon">📋</div>
+                        <div class="stat-icon">⏳</div>
                         <div class="stat-info">
-                            <h3><?php echo $stats['clearances_today']; ?></h3>
-                            <p>Clearances Today</p>
+                            <h3><?php echo $stats['pending_clearances']; ?></h3>
+                            <p>Pending Clearances</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['approved_this_month']; ?></h3>
+                            <p>Approved This Month</p>
                         </div>
                     </div>
 
@@ -1047,10 +1144,13 @@ if (!empty($student_id_search)) {
                     </div>
 
                     <div class="stat-card">
-                        <div class="stat-icon">✅</div>
+                        <div class="stat-icon">⚠️</div>
                         <div class="stat-info">
-                            <h3><?php echo $stats['active_clearances']; ?></h3>
-                            <p>Active Clearances</p>
+                            <h3><?php echo $stats['expiring_soon']; ?></h3>
+                            <p>Expiring Soon</p>
+                            <?php if ($stats['expiring_soon'] > 0): ?>
+                                <div class="warning-badge">Within 7 days</div>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -1064,7 +1164,7 @@ if (!empty($student_id_search)) {
                                 <circle cx="11" cy="11" r="8"/>
                                 <path d="M21 21L16.65 16.65"/>
                             </svg>
-                            Find Student (Walk-in)
+                            Find Student
                         </div>
                         
                         <form method="GET" action="" class="search-form">
@@ -1074,7 +1174,7 @@ if (!empty($student_id_search)) {
                                        placeholder="Enter student ID" 
                                        value="<?php echo htmlspecialchars($student_id_search); ?>" required>
                             </div>
-                            <button type="submit" class="btn btn-primary">Find Student</button>
+                            <button type="submit" class="btn btn-primary">Search Student</button>
                         </form>
 
                         <?php if ($search_error): ?>
@@ -1083,16 +1183,28 @@ if (!empty($student_id_search)) {
                             </div>
                         <?php endif; ?>
 
-                        <div style="margin-top: 20px; padding: 15px; background: #f0e2ea; border-radius: 12px;">
-                            <div style="display: flex; align-items: center; gap: 10px; color: #6b2b5e;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                                    <circle cx="12" cy="12" r="10"/>
-                                    <line x1="12" y1="12" x2="12" y2="16"/>
-                                    <line x1="12" y1="8" x2="12.01" y2="8"/>
-                                </svg>
-                                <span style="font-size: 0.9rem;">Clearances are generated immediately and ready for printing.</span>
+                        <!-- Pending Clearances List -->
+                        <?php if (!empty($pending_clearances)): ?>
+                            <div style="margin-top: 24px;">
+                                <div style="font-size: 0.9rem; font-weight: 600; color: #6b2b5e; margin-bottom: 12px;">
+                                    ⏳ Pending Clearances
+                                </div>
+                                <div class="pending-list">
+                                    <?php foreach (array_slice($pending_clearances, 0, 5) as $pending): ?>
+                                        <div class="pending-item">
+                                            <div class="pending-info">
+                                                <div class="pending-name"><?php echo htmlspecialchars($pending['student_name']); ?></div>
+                                                <div class="pending-meta">
+                                                    <span><?php echo $pending['clearance_type']; ?></span>
+                                                    <span><?php echo date('M d', strtotime($pending['request_date'])); ?></span>
+                                                </div>
+                                            </div>
+                                            <span class="pending-badge">Pending</span>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
                             </div>
-                        </div>
+                        <?php endif; ?>
                     </div>
 
                     <!-- Quick Stats Card -->
@@ -1102,23 +1214,23 @@ if (!empty($student_id_search)) {
                                 <path d="M3 3V21H21"/>
                                 <path d="M7 15L10 11L13 14L20 7"/>
                             </svg>
-                            Quick Actions
+                            Clearance Overview
                         </div>
                         
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                            <div style="background: #f0e2ea; padding: 20px; border-radius: 16px; text-align: center;">
-                                <div style="font-size: 2rem; font-weight: 700; color: #6b2b5e;"><?php echo $stats['clearances_today']; ?></div>
-                                <div style="font-size: 0.8rem; color: #7a4b6b;">Issued Today</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                            <div style="background: #f0e2ea; padding: 16px; border-radius: 16px; text-align: center;">
+                                <div style="font-size: 1.8rem; font-weight: 700; color: #6b2b5e;"><?php echo count($approved_clearances); ?></div>
+                                <div style="font-size: 0.8rem; color: #7a4b6b;">Approved</div>
                             </div>
-                            <div style="background: #f0e2ea; padding: 20px; border-radius: 16px; text-align: center;">
-                                <div style="font-size: 2rem; font-weight: 700; color: #6b2b5e;"><?php echo count($recent_clearances); ?></div>
-                                <div style="font-size: 0.8rem; color: #7a4b6b;">Total Records</div>
+                            <div style="background: #f0e2ea; padding: 16px; border-radius: 16px; text-align: center;">
+                                <div style="font-size: 1.8rem; font-weight: 700; color: #6b2b5e;"><?php echo count($all_certificates); ?></div>
+                                <div style="font-size: 0.8rem; color: #7a4b6b;">Certificates</div>
                             </div>
                         </div>
 
-                        <div style="margin-top: 10px;">
-                            <div style="font-size: 0.9rem; font-weight: 600; color: #6b2b5e; margin-bottom: 10px;">
-                                Generate:
+                        <div style="margin-top: 20px;">
+                            <div style="font-size: 0.9rem; font-weight: 600; color: #6b2b5e; margin-bottom: 12px;">
+                                Quick Actions
                             </div>
                             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                                 <button class="btn btn-sm btn-secondary" onclick="document.querySelector('[data-tab=\"clearance\"]').click()">+ Clearance</button>
@@ -1144,7 +1256,7 @@ if (!empty($student_id_search)) {
                         </p>
                         <?php if (!empty($student_data['medical_conditions'])): ?>
                             <p style="margin-top: 8px;">
-                                <span class="status-badge status-approved">⚕️ <?php echo htmlspecialchars($student_data['medical_conditions']); ?></span>
+                                <span class="status-badge status-not-cleared">⚕️ <?php echo htmlspecialchars($student_data['medical_conditions']); ?></span>
                             </p>
                         <?php endif; ?>
                     </div>
@@ -1153,13 +1265,14 @@ if (!empty($student_id_search)) {
                 <!-- Tabs Section -->
                 <div class="tabs-section">
                     <div class="tabs-header">
-                        <button class="tab-btn active" data-tab="clearance" onclick="showTab('clearance', event)">📋 Generate Clearance</button>
+                        <button class="tab-btn active" data-tab="clearance" onclick="showTab('clearance', event)">📋 Create Clearance</button>
                         <button class="tab-btn" data-tab="certificate" onclick="showTab('certificate', event)">📄 Issue Certificate</button>
                         <button class="tab-btn" data-tab="fitreturn" onclick="showTab('fitreturn', event)">🔄 Fit-to-Return</button>
+                        <button class="tab-btn" data-tab="history" onclick="showTab('history', event)">📚 Clearance History</button>
                     </div>
 
                     <div class="tab-content">
-                        <!-- Create Clearance Tab (Auto-print) -->
+                        <!-- Create Clearance Tab -->
                         <div class="tab-pane active" id="clearance">
                             <div class="form-card">
                                 <div class="form-card-title">
@@ -1169,7 +1282,7 @@ if (!empty($student_id_search)) {
                                         <line x1="8" y1="2" x2="8" y2="6"/>
                                         <line x1="3" y1="10" x2="21" y2="10"/>
                                     </svg>
-                                    Generate Instant Clearance
+                                    Create Clearance Request
                                 </div>
                                 
                                 <form method="POST" action="">
@@ -1206,21 +1319,19 @@ if (!empty($student_id_search)) {
                                     <div class="form-row">
                                         <div class="form-group">
                                             <label>Valid Until (Optional)</label>
-                                            <input type="date" name="valid_until" class="form-control" value="<?php echo date('Y-m-d', strtotime('+1 year')); ?>">
-                                            <small style="color: #7a4b6b; font-size: 0.7rem;">Default: 1 year validity</small>
+                                            <input type="date" name="valid_until" class="form-control">
+                                            <small style="color: #7a4b6b; font-size: 0.7rem;">Leave empty if no expiry</small>
                                         </div>
                                     </div>
                                     
-                                    <div style="margin-top: 20px; padding: 15px; background: #f0e2ea; border-radius: 12px; margin-bottom: 20px;">
-                                        <div style="display: flex; align-items: center; gap: 10px; color: #6b2b5e;">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                                                <path d="M6 9L12 15L18 9"/>
-                                            </svg>
-                                            <span style="font-size: 0.9rem;">Clearance will be generated as PDF immediately after submission.</span>
+                                    <div class="pdf-option">
+                                        <div class="checkbox-group">
+                                            <input type="checkbox" name="generate_pdf" id="generate_pdf_clr" value="yes" checked>
+                                            <label for="generate_pdf_clr">Generate clearance form immediately (PDF)</label>
                                         </div>
                                     </div>
                                     
-                                    <button type="submit" class="btn btn-primary">Generate Clearance PDF</button>
+                                    <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Create Clearance Request</button>
                                 </form>
                             </div>
                         </div>
@@ -1287,7 +1398,14 @@ if (!empty($student_id_search)) {
                                         <textarea name="remarks" class="form-control" placeholder="Any additional notes..."></textarea>
                                     </div>
                                     
-                                    <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Generate Certificate PDF</button>
+                                    <div class="pdf-option">
+                                        <div class="checkbox-group">
+                                            <input type="checkbox" name="generate_pdf" id="generate_pdf_cert" value="yes" checked>
+                                            <label for="generate_pdf_cert">Generate PDF certificate immediately</label>
+                                        </div>
+                                    </div>
+                                    
+                                    <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Issue Certificate</button>
                                 </form>
                             </div>
                         </div>
@@ -1371,75 +1489,372 @@ if (!empty($student_id_search)) {
                                         </div>
                                     </div>
                                     
-                                    <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Generate Fit-to-Return PDF</button>
+                                    <div class="pdf-option">
+                                        <div class="checkbox-group">
+                                            <input type="checkbox" name="generate_pdf" id="generate_pdf_ftr" value="yes" checked>
+                                            <label for="generate_pdf_ftr">Generate PDF fit-to-return slip</label>
+                                        </div>
+                                    </div>
+                                    
+                                    <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Create Fit-to-Return Slip</button>
                                 </form>
+                            </div>
+                        </div>
+
+                        <!-- Clearance History Tab -->
+                        <div class="tab-pane" id="history">
+                            <div class="form-card-title" style="margin-bottom: 20px;">
+                                📚 Clearance & Certificate History for <?php echo htmlspecialchars($student_data['full_name']); ?>
+                            </div>
+                            
+                            <!-- Clearance Requests -->
+                            <h3 style="color: #6b2b5e; margin: 20px 0 10px; font-size: 1rem;">Clearance Requests</h3>
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Code</th>
+                                            <th>Type</th>
+                                            <th>Request Date</th>
+                                            <th>Purpose</th>
+                                            <th>Status</th>
+                                            <th>Valid Until</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php 
+                                        $student_clearances = getClearanceRequests($db);
+                                        $student_clearances = array_filter($student_clearances, function($c) use ($student_data) {
+                                            return $c['student_id'] == $student_data['student_id'];
+                                        });
+                                        ?>
+                                        <?php if (!empty($student_clearances)): ?>
+                                            <?php foreach ($student_clearances as $clearance): ?>
+                                                <tr>
+                                                    <td><span class="clearance-code"><?php echo htmlspecialchars($clearance['clearance_code']); ?></span></td>
+                                                    <td><?php echo $clearance['clearance_type']; ?></td>
+                                                    <td><?php echo date('M d, Y', strtotime($clearance['request_date'])); ?></td>
+                                                    <td><?php echo htmlspecialchars(substr($clearance['purpose'], 0, 30)) . '...'; ?></td>
+                                                    <td>
+                                                        <span class="status-badge status-<?php echo strtolower($clearance['status']); ?>">
+                                                            <?php echo $clearance['status']; ?>
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <?php echo !empty($clearance['valid_until']) ? date('M d, Y', strtotime($clearance['valid_until'])) : 'No expiry'; ?>
+                                                    </td>
+                                                    <td>
+                                                        <div class="action-buttons">
+                                                            <a href="generate_clearance.php?id=<?php echo $clearance['id']; ?>" target="_blank" class="pdf-link">
+                                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+                                                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                                                    <polyline points="14 2 14 8 20 8"/>
+                                                                    <line x1="16" y1="13" x2="8" y2="13"/>
+                                                                    <line x1="16" y1="17" x2="8" y2="17"/>
+                                                                    <polyline points="10 9 9 9 8 9"/>
+                                                                </svg>
+                                                                PDF
+                                                            </a>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="7" class="empty-state">
+                                                    <p>No clearance requests found</p>
+                                                </td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <!-- Medical Certificates -->
+                            <h3 style="color: #6b2b5e; margin: 30px 0 10px; font-size: 1rem;">Medical Certificates</h3>
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Code</th>
+                                            <th>Type</th>
+                                            <th>Issue Date</th>
+                                            <th>Findings</th>
+                                            <th>Valid Until</th>
+                                            <th>Issued By</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (!empty($student_data['certificates'])): ?>
+                                            <?php foreach ($student_data['certificates'] as $cert): ?>
+                                                <tr>
+                                                    <td><span class="clearance-code"><?php echo htmlspecialchars($cert['certificate_code']); ?></span></td>
+                                                    <td><?php echo $cert['certificate_type']; ?></td>
+                                                    <td><?php echo date('M d, Y', strtotime($cert['issued_date'])); ?></td>
+                                                    <td><?php echo htmlspecialchars(substr($cert['findings'], 0, 30)) . '...'; ?></td>
+                                                    <td>
+                                                        <?php echo !empty($cert['valid_until']) ? date('M d, Y', strtotime($cert['valid_until'])) : 'No expiry'; ?>
+                                                    </td>
+                                                    <td><?php echo htmlspecialchars($cert['issued_by']); ?></td>
+                                                    <td>
+                                                        <div class="action-buttons">
+                                                            <a href="generate_certificate.php?id=<?php echo $cert['id']; ?>" target="_blank" class="pdf-link">
+                                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+                                                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                                                    <polyline points="14 2 14 8 20 8"/>
+                                                                    <line x1="16" y1="13" x2="8" y2="13"/>
+                                                                    <line x1="16" y1="17" x2="8" y2="17"/>
+                                                                    <polyline points="10 9 9 9 8 9"/>
+                                                                </svg>
+                                                                PDF
+                                                            </a>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="7" class="empty-state">
+                                                    <p>No medical certificates found</p>
+                                                </td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <!-- Fit-to-Return Slips -->
+                            <h3 style="color: #6b2b5e; margin: 30px 0 10px; font-size: 1rem;">Fit-to-Return Slips</h3>
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Code</th>
+                                            <th>Assessment Date</th>
+                                            <th>Findings</th>
+                                            <th>Fit to Return</th>
+                                            <th>Restrictions</th>
+                                            <th>Issued By</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (!empty($student_data['fit_to_return'])): ?>
+                                            <?php foreach ($student_data['fit_to_return'] as $slip): ?>
+                                                <tr>
+                                                    <td><span class="clearance-code"><?php echo htmlspecialchars($slip['slip_code']); ?></span></td>
+                                                    <td><?php echo date('M d, Y', strtotime($slip['assessment_date'])); ?></td>
+                                                    <td><?php echo htmlspecialchars(substr($slip['findings'], 0, 30)) . '...'; ?></td>
+                                                    <td>
+                                                        <span class="status-badge status-<?php echo strtolower($slip['fit_to_return']); ?>">
+                                                            <?php echo $slip['fit_to_return']; ?>
+                                                        </span>
+                                                    </td>
+                                                    <td><?php echo htmlspecialchars($slip['restrictions'] ?: 'None'); ?></td>
+                                                    <td><?php echo htmlspecialchars($slip['issued_by']); ?></td>
+                                                    <td>
+                                                        <div class="action-buttons">
+                                                            <a href="generate_fit_to_return.php?id=<?php echo $slip['id']; ?>" target="_blank" class="pdf-link">
+                                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+                                                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                                                    <polyline points="14 2 14 8 20 8"/>
+                                                                    <line x1="16" y1="13" x2="8" y2="13"/>
+                                                                    <line x1="16" y1="17" x2="8" y2="17"/>
+                                                                    <polyline points="10 9 9 9 8 9"/>
+                                                                </svg>
+                                                                PDF
+                                                            </a>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="7" class="empty-state">
+                                                    <p>No fit-to-return slips found</p>
+                                                </td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
                 </div>
                 <?php endif; ?>
 
-                <!-- Recent Clearances -->
-                <?php if (!empty($recent_clearances)): ?>
-                <div class="recent-section">
-                    <div class="card-title">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"/>
-                            <path d="M14 2V8H20"/>
-                        </svg>
-                        Recently Generated Clearances
+                <!-- All Pending Clearances (if no student selected) -->
+                <?php if (!$student_data && !empty($pending_clearances)): ?>
+                <div class="tabs-section" style="margin-top: 20px;">
+                    <div class="tabs-header">
+                        <button class="tab-btn active" onclick="showAllTab('pending', event)">⏳ Pending Clearances</button>
+                        <button class="tab-btn" onclick="showAllTab('approved', event)">✅ Approved</button>
+                        <button class="tab-btn" onclick="showAllTab('certificates', event)">📄 Recent Certificates</button>
                     </div>
 
-                    <div class="table-wrapper">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Clearance Code</th>
-                                    <th>Student</th>
-                                    <th>Type</th>
-                                    <th>Date</th>
-                                    <th>Valid Until</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($recent_clearances as $clearance): ?>
-                                    <tr>
-                                        <td><span class="clearance-code"><?php echo htmlspecialchars($clearance['clearance_code']); ?></span></td>
-                                        <td>
-                                            <strong><?php echo htmlspecialchars($clearance['student_name']); ?></strong><br>
-                                            <small><?php echo $clearance['student_id']; ?></small>
-                                        </td>
-                                        <td><?php echo $clearance['clearance_type']; ?></td>
-                                        <td><?php echo date('M d, Y', strtotime($clearance['request_date'])); ?></td>
-                                        <td>
-                                            <?php echo !empty($clearance['valid_until']) ? date('M d, Y', strtotime($clearance['valid_until'])) : 'No expiry'; ?>
-                                        </td>
-                                        <td>
-                                            <span class="status-badge status-approved"><?php echo $clearance['status']; ?></span>
-                                        </td>
-                                        <td>
-                                            <a href="generate_clearance.php?id=<?php echo $clearance['id']; ?>" target="_blank" class="print-link">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                                    <path d="M6 18L18 18"/>
-                                                    <path d="M6 14L18 14"/>
-                                                    <path d="M4 6L20 6"/>
-                                                    <path d="M4 10L20 10"/>
-                                                    <path d="M4 6V18"/>
-                                                    <path d="M20 6V18"/>
-                                                </svg>
-                                                Print Again
-                                            </a>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
+                    <div class="tab-content">
+                        <!-- Pending Tab -->
+                        <div class="tab-pane active" id="all-pending">
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Code</th>
+                                            <th>Student</th>
+                                            <th>Type</th>
+                                            <th>Request Date</th>
+                                            <th>Purpose</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($pending_clearances as $clearance): ?>
+                                            <tr>
+                                                <td><span class="clearance-code"><?php echo htmlspecialchars($clearance['clearance_code']); ?></span></td>
+                                                <td>
+                                                    <strong><?php echo htmlspecialchars($clearance['student_name']); ?></strong><br>
+                                                    <small><?php echo $clearance['student_id']; ?></small>
+                                                </td>
+                                                <td><?php echo $clearance['clearance_type']; ?></td>
+                                                <td><?php echo date('M d, Y', strtotime($clearance['request_date'])); ?></td>
+                                                <td><?php echo htmlspecialchars(substr($clearance['purpose'], 0, 30)) . '...'; ?></td>
+                                                <td>
+                                                    <span class="status-badge status-pending">Pending</span>
+                                                </td>
+                                                <td>
+                                                    <div class="action-buttons">
+                                                        <button class="btn btn-sm btn-secondary" onclick="openUpdateModal(<?php echo $clearance['id']; ?>, '<?php echo $clearance['clearance_code']; ?>', '<?php echo addslashes($clearance['student_name']); ?>')">Update</button>
+                                                        <a href="generate_clearance.php?id=<?php echo $clearance['id']; ?>" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration: none;">PDF</a>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Approved Tab -->
+                        <div class="tab-pane" id="all-approved">
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Code</th>
+                                            <th>Student</th>
+                                            <th>Type</th>
+                                            <th>Approved Date</th>
+                                            <th>Approved By</th>
+                                            <th>Valid Until</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($approved_clearances as $clearance): ?>
+                                            <tr>
+                                                <td><span class="clearance-code"><?php echo htmlspecialchars($clearance['clearance_code']); ?></span></td>
+                                                <td>
+                                                    <strong><?php echo htmlspecialchars($clearance['student_name']); ?></strong><br>
+                                                    <small><?php echo $clearance['student_id']; ?></small>
+                                                </td>
+                                                <td><?php echo $clearance['clearance_type']; ?></td>
+                                                <td><?php echo date('M d, Y', strtotime($clearance['approved_date'])); ?></td>
+                                                <td><?php echo htmlspecialchars($clearance['approved_by']); ?></td>
+                                                <td><?php echo !empty($clearance['valid_until']) ? date('M d, Y', strtotime($clearance['valid_until'])) : 'No expiry'; ?></td>
+                                                <td>
+                                                    <a href="generate_clearance.php?id=<?php echo $clearance['id']; ?>" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration: none;">PDF</a>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Certificates Tab -->
+                        <div class="tab-pane" id="all-certificates">
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Code</th>
+                                            <th>Student</th>
+                                            <th>Type</th>
+                                            <th>Issue Date</th>
+                                            <th>Issued By</th>
+                                            <th>Valid Until</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach (array_slice($all_certificates, 0, 20) as $cert): ?>
+                                            <tr>
+                                                <td><span class="clearance-code"><?php echo htmlspecialchars($cert['certificate_code']); ?></span></td>
+                                                <td>
+                                                    <strong><?php echo htmlspecialchars($cert['student_name']); ?></strong><br>
+                                                    <small><?php echo $cert['student_id']; ?></small>
+                                                </td>
+                                                <td><?php echo $cert['certificate_type']; ?></td>
+                                                <td><?php echo date('M d, Y', strtotime($cert['issued_date'])); ?></td>
+                                                <td><?php echo htmlspecialchars($cert['issued_by']); ?></td>
+                                                <td><?php echo !empty($cert['valid_until']) ? date('M d, Y', strtotime($cert['valid_until'])) : 'No expiry'; ?></td>
+                                                <td>
+                                                    <a href="generate_certificate.php?id=<?php echo $cert['id']; ?>" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration: none;">PDF</a>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <?php endif; ?>
             </div>
+        </div>
+    </div>
+
+    <!-- Update Clearance Modal -->
+    <div id="updateModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 1000;">
+        <div style="background: white; border-radius: 20px; padding: 30px; max-width: 500px; width: 90%;">
+            <h3 style="color: #6b2b5e; margin-bottom: 20px;">Update Clearance Status</h3>
+            <form method="POST" action="">
+                <input type="hidden" name="action" value="update_clearance">
+                <input type="hidden" name="clearance_id" id="modal_clearance_id">
+                
+                <div style="margin-bottom: 15px;">
+                    <strong>Student:</strong> <span id="modal_student_name"></span><br>
+                    <strong>Code:</strong> <span id="modal_clearance_code"></span>
+                </div>
+                
+                <div class="form-group">
+                    <label>Status</label>
+                    <select name="status" class="form-control" required>
+                        <option value="Approved">Approve</option>
+                        <option value="Not Cleared">Not Cleared</option>
+                        <option value="Pending">Keep Pending</option>
+                        <option value="Expired">Mark as Expired</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Valid Until (if approved)</label>
+                    <input type="date" name="valid_until" class="form-control">
+                </div>
+                
+                <div class="form-group">
+                    <label>Remarks</label>
+                    <textarea name="remarks" class="form-control" placeholder="Add remarks..."></textarea>
+                </div>
+                
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary" style="flex: 1;">Update Status</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeUpdateModal()" style="flex: 1;">Cancel</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -1459,13 +1874,39 @@ if (!empty($student_id_search)) {
         // Tab functionality
         function showTab(tabName, event) {
             document.querySelectorAll('.tab-pane').forEach(pane => {
-                pane.classList.remove('active');
+                if (pane.id !== 'all-pending' && pane.id !== 'all-approved' && pane.id !== 'all-certificates') {
+                    pane.classList.remove('active');
+                }
             });
             document.querySelectorAll('.tab-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
             document.getElementById(tabName).classList.add('active');
             event.target.classList.add('active');
+        }
+
+        // All tabs functionality
+        function showAllTab(tabName, event) {
+            document.querySelectorAll('#all-pending, #all-approved, #all-certificates').forEach(pane => {
+                pane.classList.remove('active');
+            });
+            document.querySelectorAll('.tabs-section .tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById('all-' + tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // Modal functions
+        function openUpdateModal(id, code, name) {
+            document.getElementById('modal_clearance_id').value = id;
+            document.getElementById('modal_clearance_code').textContent = code;
+            document.getElementById('modal_student_name').textContent = name;
+            document.getElementById('updateModal').style.display = 'flex';
+        }
+
+        function closeUpdateModal() {
+            document.getElementById('updateModal').style.display = 'none';
         }
 
         // Auto-hide alerts
