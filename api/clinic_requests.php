@@ -21,7 +21,6 @@ class ClinicRequestsAPI {
         $this->conn = $database->getConnection();
     }
     
-    // Main handler
     public function handleRequest() {
         $method = $_SERVER['REQUEST_METHOD'];
         $endpoint = isset($_GET['endpoint']) ? $_GET['endpoint'] : '';
@@ -42,7 +41,6 @@ class ClinicRequestsAPI {
         }
     }
     
-    // Handle GET requests
     private function handleGet($endpoint) {
         switch ($endpoint) {
             case 'pending':
@@ -58,12 +56,11 @@ class ClinicRequestsAPI {
                 $this->getRequestById();
                 break;
             default:
-                $this->getPendingRequests(); // Default to pending
+                $this->getPendingRequests();
                 break;
         }
     }
     
-    // Handle PUT requests (approve/reject/release)
     private function handlePut($endpoint) {
         $data = json_decode(file_get_contents('php://input'), true);
         
@@ -82,16 +79,12 @@ class ClinicRequestsAPI {
             case 'release':
                 $this->releaseRequest($data);
                 break;
-            case 'receive':
-                $this->receiveRequest($data);
-                break;
             default:
                 $this->sendResponse(404, ['error' => 'Endpoint not found']);
                 break;
         }
     }
     
-    // Handle DELETE requests (cancel)
     private function handleDelete($endpoint) {
         if ($endpoint == 'cancel') {
             $data = json_decode(file_get_contents('php://input'), true);
@@ -101,7 +94,6 @@ class ClinicRequestsAPI {
         }
     }
     
-    // Get all pending requests
     private function getPendingRequests() {
         try {
             $query = "SELECT 
@@ -128,10 +120,10 @@ class ClinicRequestsAPI {
                     'code' => $request['item_code'],
                     'name' => $request['item_name'],
                     'category' => $request['category'],
-                    'quantity' => $request['quantity_requested']
+                    'quantity' => $request['quantity_requested'],
+                    'unit' => $request['unit'] ?? 'piece'
                 ];
                 
-                // Remove redundant fields
                 unset($request['id']);
                 unset($request['requested_by_fullname']);
                 unset($request['requested_by_email']);
@@ -152,7 +144,6 @@ class ClinicRequestsAPI {
         }
     }
     
-    // Get all requests with filters
     private function getAllRequests() {
         try {
             $status = isset($_GET['status']) ? $_GET['status'] : '';
@@ -213,7 +204,6 @@ class ClinicRequestsAPI {
         }
     }
     
-    // Get single request by ID
     private function getRequestById() {
         try {
             $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
@@ -228,11 +218,11 @@ class ClinicRequestsAPI {
                         u.full_name as requested_by_fullname,
                         u.email as requested_by_email,
                         u2.full_name as approved_by_fullname,
-                        u3.full_name as received_by_fullname
+                        u3.full_name as released_by_fullname
                       FROM medicine_requests mr
                       LEFT JOIN users u ON mr.requested_by = u.id
                       LEFT JOIN users u2 ON mr.approved_by = u2.id
-                      LEFT JOIN users u3 ON mr.received_by = u3.id
+                      LEFT JOIN users u3 ON mr.released_by = u3.id
                       WHERE mr.id = :id";
             
             $stmt = $this->conn->prepare($query);
@@ -261,7 +251,6 @@ class ClinicRequestsAPI {
         }
     }
     
-    // Get request statistics
     private function getRequestStats() {
         try {
             $stats = [];
@@ -309,15 +298,6 @@ class ClinicRequestsAPI {
             $stmt = $this->conn->query($query);
             $stats['top_items'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
-            // Average processing time
-            $query = "SELECT 
-                        AVG(TIMESTAMPDIFF(HOUR, requested_date, approved_date)) as avg_approval_hours,
-                        AVG(TIMESTAMPDIFF(HOUR, approved_date, released_date)) as avg_release_hours
-                      FROM medicine_requests
-                      WHERE approved_date IS NOT NULL";
-            $stmt = $this->conn->query($query);
-            $stats['processing_times'] = $stmt->fetch(PDO::FETCH_ASSOC);
-            
             $this->sendResponse(200, [
                 'success' => true,
                 'data' => $stats,
@@ -332,7 +312,6 @@ class ClinicRequestsAPI {
         }
     }
     
-    // Approve a request
     private function approveRequest($data) {
         try {
             $id = isset($data['request_id']) ? intval($data['request_id']) : 0;
@@ -378,7 +357,6 @@ class ClinicRequestsAPI {
             $stmt->bindParam(':id', $id);
             
             if ($stmt->execute()) {
-                // Log the action
                 $this->logAction('approve', $id, $approved_by, $quantity_approved);
                 
                 $this->sendResponse(200, [
@@ -401,7 +379,6 @@ class ClinicRequestsAPI {
         }
     }
     
-    // Reject a request
     private function rejectRequest($data) {
         try {
             $id = isset($data['request_id']) ? intval($data['request_id']) : 0;
@@ -437,7 +414,6 @@ class ClinicRequestsAPI {
             $stmt->bindParam(':id', $id);
             
             if ($stmt->execute()) {
-                // Log the action
                 $this->logAction('reject', $id, $rejected_by, 0, $rejection_reason);
                 
                 $this->sendResponse(200, [
@@ -460,7 +436,6 @@ class ClinicRequestsAPI {
         }
     }
     
-    // Mark as released (custodian has given the items)
     private function releaseRequest($data) {
         try {
             $id = isset($data['request_id']) ? intval($data['request_id']) : 0;
@@ -505,18 +480,18 @@ class ClinicRequestsAPI {
                            (:item_code, :item_name, :category, :quantity, :unit, CURDATE(), 10, :received_from, :request_id)";
             
             $stock_stmt = $this->conn->prepare($stock_query);
+            $unit = $request['unit'] ?? ($request['category'] == 'Medicine' ? 'tablet' : 'piece');
             $stock_stmt->bindParam(':item_code', $request['item_code']);
             $stock_stmt->bindParam(':item_name', $request['item_name']);
             $stock_stmt->bindParam(':category', $request['category']);
             $stock_stmt->bindParam(':quantity', $request['quantity_approved']);
-            $stock_stmt->bindParam(':unit', $request['unit']);
+            $stock_stmt->bindParam(':unit', $unit);
             $stock_stmt->bindParam(':received_from', $released_by);
             $stock_stmt->bindParam(':request_id', $id);
             $stock_stmt->execute();
             
             $this->conn->commit();
             
-            // Log the action
             $this->logAction('release', $id, $released_by, $request['quantity_approved']);
             
             $this->sendResponse(200, [
@@ -528,7 +503,7 @@ class ClinicRequestsAPI {
                     'items_added' => [
                         'item_name' => $request['item_name'],
                         'quantity' => $request['quantity_approved'],
-                        'unit' => $request['unit']
+                        'unit' => $unit
                     ],
                     'released_by' => $released_by,
                     'released_date' => date('Y-m-d H:i:s')
@@ -541,64 +516,6 @@ class ClinicRequestsAPI {
         }
     }
     
-    // Clinic receives the items (confirmation)
-    private function receiveRequest($data) {
-        try {
-            $id = isset($data['request_id']) ? intval($data['request_id']) : 0;
-            $received_by = isset($data['received_by']) ? $data['received_by'] : 'Clinic Staff';
-            $received_date = isset($data['received_date']) ? $data['received_date'] : date('Y-m-d H:i:s');
-            
-            if (!$id) {
-                $this->sendResponse(400, ['error' => 'Request ID is required']);
-                return;
-            }
-            
-            // Check if request exists and is released
-            $check = $this->conn->prepare("SELECT * FROM medicine_requests WHERE id = :id AND status = 'released'");
-            $check->bindParam(':id', $id);
-            $check->execute();
-            
-            if ($check->rowCount() == 0) {
-                $this->sendResponse(404, ['error' => 'Request not found or not released']);
-                return;
-            }
-            
-            // Update request status to received
-            $query = "UPDATE medicine_requests 
-                      SET status = 'received',
-                          received_by = :received_by,
-                          received_date = :received_date
-                      WHERE id = :id";
-            
-            $stmt = $this->conn->prepare($query);
-            $stmt->bindParam(':received_by', $received_by);
-            $stmt->bindParam(':received_date', $received_date);
-            $stmt->bindParam(':id', $id);
-            
-            if ($stmt->execute()) {
-                // Log the action
-                $this->logAction('receive', $id, $received_by);
-                
-                $this->sendResponse(200, [
-                    'success' => true,
-                    'message' => 'Items received by clinic',
-                    'data' => [
-                        'request_id' => $id,
-                        'status' => 'received',
-                        'received_by' => $received_by,
-                        'received_date' => $received_date
-                    ]
-                ]);
-            } else {
-                $this->sendResponse(500, ['error' => 'Failed to confirm receipt']);
-            }
-            
-        } catch (PDOException $e) {
-            $this->sendResponse(500, ['error' => 'Database error: ' . $e->getMessage()]);
-        }
-    }
-    
-    // Cancel a request (clinic cancels before approval)
     private function cancelRequest($data) {
         try {
             $id = isset($data['request_id']) ? intval($data['request_id']) : 0;
@@ -631,7 +548,6 @@ class ClinicRequestsAPI {
             $stmt->bindParam(':id', $id);
             
             if ($stmt->execute()) {
-                // Log the action
                 $this->logAction('cancel', $id, $cancelled_by, 0, $cancel_reason);
                 
                 $this->sendResponse(200, [
@@ -653,7 +569,6 @@ class ClinicRequestsAPI {
         }
     }
     
-    // Log actions for audit trail
     private function logAction($action, $request_id, $user, $quantity = null, $notes = null) {
         try {
             // Create audit log table if not exists
@@ -680,12 +595,10 @@ class ClinicRequestsAPI {
             $stmt->execute();
             
         } catch (Exception $e) {
-            // Silently fail - logging shouldn't break main functionality
             error_log("Failed to log action: " . $e->getMessage());
         }
     }
     
-    // Send JSON response
     private function sendResponse($status_code, $data) {
         http_response_code($status_code);
         echo json_encode($data, JSON_PRETTY_PRINT);
