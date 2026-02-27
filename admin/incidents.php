@@ -2264,7 +2264,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                 <?php endforeach; ?>
             </select>
             <input type="number" name="medicine_quantity[]" class="form-control medicine-quantity" 
-                   placeholder="Qty" min="1" step="1" required onchange="validateMedicineQuantity(this)">
+                   placeholder="Qty" min="1" step="1" onchange="validateMedicineQuantity(this)">
             <div class="medicine-stock" id="medicine-stock-info"></div>
             <button type="button" class="remove-medicine" onclick="removeMedicineRow(this)">✕</button>
         </div>
