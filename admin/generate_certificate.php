@@ -1,8 +1,8 @@
 <?php
-require_once '../vendor/autoload.php';
+require_once('../vendor/setasign/fpdf/fpdf.php');
 require_once '../config/database.php';
 
-use setasign\Fpdi\Fpdf;
+
 
 session_start();
 if (!isset($_SESSION['user_id'])) {
