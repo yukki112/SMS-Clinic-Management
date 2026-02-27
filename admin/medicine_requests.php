@@ -94,30 +94,30 @@ try {
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     
     // Create new request to property custodian
-    if (isset($_POST['action']) && $_POST['action'] == 'create_request') {
-        try {
-            // Fetch item details from property custodian API
-            $api_url = "https://qcprotektado.com/api/clinic_api.php?endpoint=";
-            if ($_POST['category'] == 'Medicine') {
-                $api_url .= "medicines&id=" . $_POST['item_id'];
-            } else {
-                $api_url .= "supplies&id=" . $_POST['item_id'];
-            }
+   if (isset($_POST['action']) && $_POST['action'] == 'create_request') {
+    try {
+        $api_url = "https://qcprotektado.com/api/clinic_requests_handler.php?action=";
+        if ($_POST['category'] == 'Medicine') {
+            $api_url .= "get_medicine_by_id&id=" . $_POST['item_id'];
+        } else {
+            $api_url .= "get_supply_by_id&id=" . $_POST['item_id'];
+        }
+        
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $api_url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        
+        if ($http_code == 200 && $response) {
+            $item_data = json_decode($response, true);
             
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $api_url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-            $response = curl_exec($ch);
-            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            
-            if ($http_code == 200 && $response) {
-                $item_data = json_decode($response, true);
-                
-                if (isset($item_data['data'])) {
-                    $item = $item_data['data'];
+            if (isset($item_data['data'])) {
+                $item = $item_data['data'];
+
                     
                     // Generate request code
                     $prefix = $_POST['category'] == 'Medicine' ? 'MEDREQ' : 'SUPREQ';
@@ -260,7 +260,7 @@ function checkForApprovedRequests($db) {
         
         foreach ($pending_requests as $request) {
             // Check with property custodian API for status
-            $api_url = "https://qcprotektado.com/api/clinic_requests.php?endpoint=request&id=" . $request['id'];
+            $api_url = "https://cms.bcps4core.com/api/clinic_requests.php?endpoint=request&id=" . $request['id'];
             
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -318,7 +318,7 @@ function checkForApprovedRequests($db) {
 
 // Fetch data from property custodian API
 function fetchPropertyItems($type) {
-    $api_url = "https://qcprotektado.com/api/clinic_api.php?endpoint=" . $type;
+    $api_url = "https://qcprotektado.com/api/clinic_requests_handler.php?action=get_" . $type;
     
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -336,7 +336,6 @@ function fetchPropertyItems($type) {
     }
     return [];
 }
-
 // Get clinic stock
 function getClinicStock($db) {
     $query = "SELECT * FROM clinic_stock ORDER BY item_name ASC";
