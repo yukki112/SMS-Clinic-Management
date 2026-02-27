@@ -56,7 +56,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
             <div class="nav-section">
                 <div class="nav-section-title">
-                    <span>Patient Management</span>
+                    <span>Patient Records</span>
                 </div>
                 <ul class="nav-menu">
                     <li class="nav-item <?php echo $current_page == 'student_records.php' ? 'active' : ''; ?>">
@@ -67,7 +67,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                     <path d="M6.5 2H20V22H6.5C5.83696 22 5.20107 21.7366 4.73223 21.2678C4.26339 20.7989 4 20.163 4 19.5V4.5C4 3.83696 4.26339 3.20107 4.73223 2.73223C5.20107 2.26339 5.83696 2 6.5 2V2Z" stroke-linecap="round" stroke-linejoin="round"/>
                                 </svg>
                             </div>
-                            <span class="nav-label">Student Records</span>
+                            <span class="nav-label">Students Medical Records</span>
                             <span class="nav-count">284</span>
                         </a>
                     </li>
@@ -79,7 +79,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                     <path d="M5.5 20V19C5.5 17.1435 6.2375 15.363 7.55025 14.0503C8.86301 12.7375 10.6435 12 12.5 12C14.3565 12 16.137 12.7375 17.4497 14.0503C18.7625 15.363 19.5 17.1435 19.5 19V20" stroke-linecap="round" stroke-linejoin="round"/>
                                 </svg>
                             </div>
-                            <span class="nav-label">Clinic Visits</span>
+                            <span class="nav-label">Clinic Visits & Consultation</span>
                             <span class="nav-count">47</span>
                         </a>
                     </li>
@@ -93,7 +93,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                     <path d="M19.5 9.5V19.5" stroke-linecap="round" stroke-linejoin="round"/>
                                 </svg>
                             </div>
-                            <span class="nav-label">Medicine & Requests</span>
+                            <span class="nav-label">Medicine & Supplies Inventory</span>
                             <span class="nav-badge">12</span>
                         </a>
                     </li>
