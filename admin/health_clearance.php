@@ -3,7 +3,7 @@ session_start();
 require_once '../config/database.php';
 require_once '../vendor/autoload.php';
 
-use setasign\Fpdi\Fpdf;
+
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
@@ -32,6 +32,8 @@ $search_error = '';
 $student_id_search = isset($_GET['student_id']) ? $_GET['student_id'] : '';
 $success_message = '';
 $error_message = '';
+$view_document = isset($_GET['view']) ? $_GET['view'] : null;
+$view_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
 // Create clearance tables if not exists
 try {
@@ -48,8 +50,14 @@ try {
         `status` enum('Pending','Approved','Not Cleared','Expired') DEFAULT 'Pending',
         `approved_date` date DEFAULT NULL,
         `approved_by` varchar(100) DEFAULT NULL,
+        `findings` text DEFAULT NULL,
+        `vital_signs` text DEFAULT NULL,
+        `assessment` text DEFAULT NULL,
+        `recommendations` text DEFAULT NULL,
+        `restrictions` text DEFAULT NULL,
         `remarks` text DEFAULT NULL,
         `valid_until` date DEFAULT NULL,
+        `pdf_path` varchar(255) DEFAULT NULL,
         `created_by` int(11) NOT NULL,
         `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
         PRIMARY KEY (`id`),
@@ -69,11 +77,14 @@ try {
         `issued_date` date NOT NULL,
         `valid_until` date DEFAULT NULL,
         `findings` text DEFAULT NULL,
+        `vital_signs` text DEFAULT NULL,
+        `assessment` text DEFAULT NULL,
         `recommendations` text DEFAULT NULL,
         `restrictions` text DEFAULT NULL,
         `issued_by` varchar(100) NOT NULL,
         `issuer_id` int(11) NOT NULL,
         `remarks` text DEFAULT NULL,
+        `pdf_path` varchar(255) DEFAULT NULL,
         `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
         PRIMARY KEY (`id`),
         UNIQUE KEY `certificate_code` (`certificate_code`),
@@ -95,12 +106,14 @@ try {
         `blood_pressure` varchar(10) DEFAULT NULL,
         `heart_rate` int(11) DEFAULT NULL,
         `findings` text DEFAULT NULL,
+        `assessment` text DEFAULT NULL,
         `fit_to_return` enum('Yes','No','With Restrictions') DEFAULT 'Yes',
         `restrictions` text DEFAULT NULL,
         `recommended_rest_days` int(11) DEFAULT NULL,
         `next_checkup_date` date DEFAULT NULL,
         `issued_by` varchar(100) NOT NULL,
         `issuer_id` int(11) NOT NULL,
+        `pdf_path` varchar(255) DEFAULT NULL,
         `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
         PRIMARY KEY (`id`),
         UNIQUE KEY `slip_code` (`slip_code`),
@@ -111,26 +124,194 @@ try {
     error_log("Error creating tables: " . $e->getMessage());
 }
 
+// Function to generate PDF for clearance
+function generateClearancePDF($clearance_id, $db, $student_data, $clearance_data) {
+    try {
+        // Create PDF directory if not exists
+        $pdf_dir = '../uploads/clearances/';
+        if (!file_exists($pdf_dir)) {
+            mkdir($pdf_dir, 0777, true);
+        }
+        
+        $filename = 'clearance_' . $clearance_data['clearance_code'] . '.pdf';
+        $filepath = $pdf_dir . $filename;
+        
+        class ClearancePDF extends FPDF
+        {
+            function Header()
+            {
+                $this->SetFont('Arial', 'B', 16);
+                $this->Cell(0, 10, 'SCHOOL HEALTH CLEARANCE', 0, 1, 'C');
+                $this->Ln(5);
+                
+                $this->SetFont('Arial', '', 10);
+                $this->Cell(0, 5, 'ICARE School Clinic', 0, 1, 'C');
+                $this->Ln(5);
+                
+                $this->SetDrawColor(161, 74, 118);
+                $this->Line(10, 40, 200, 40);
+                $this->Ln(10);
+            }
+            
+            function Footer()
+            {
+                $this->SetY(-30);
+                $this->SetFont('Arial', 'I', 8);
+                $this->Cell(0, 5, 'This is a system-generated clearance document.', 0, 1, 'C');
+                $this->Cell(0, 5, 'Generated on: ' . date('F d, Y'), 0, 1, 'C');
+            }
+        }
+        
+        $pdf = new ClearancePDF();
+        $pdf->AddPage();
+        $pdf->SetFont('Arial', '', 12);
+        
+        // Clearance details
+        $pdf->Cell(45, 10, 'Clearance No:', 0, 0);
+        $pdf->SetFont('Arial', 'B', 12);
+        $pdf->Cell(0, 10, $clearance_data['clearance_code'], 0, 1);
+        
+        $pdf->SetFont('Arial', '', 12);
+        $pdf->Cell(45, 10, 'Student Name:', 0, 0);
+        $pdf->SetFont('Arial', 'B', 12);
+        $pdf->Cell(0, 10, $student_data['full_name'], 0, 1);
+        
+        $pdf->SetFont('Arial', '', 12);
+        $pdf->Cell(45, 10, 'Student ID:', 0, 0);
+        $pdf->SetFont('Arial', 'B', 12);
+        $pdf->Cell(0, 10, $student_data['student_id'], 0, 1);
+        
+        $grade_section = "Grade " . ($student_data['year_level'] ?? 'N/A') . " - " . ($student_data['section'] ?? 'N/A');
+        $pdf->Cell(45, 10, 'Grade/Section:', 0, 0);
+        $pdf->Cell(0, 10, $grade_section, 0, 1);
+        
+        $pdf->Ln(10);
+        
+        // Clearance Type and Purpose
+        $pdf->SetFont('Arial', 'B', 12);
+        $pdf->Cell(0, 10, 'CLEARANCE DETAILS', 0, 1);
+        
+        $pdf->SetFont('Arial', '', 12);
+        $pdf->Cell(45, 8, 'Type:', 0, 0);
+        $pdf->Cell(0, 8, $clearance_data['clearance_type'], 0, 1);
+        
+        $pdf->Cell(45, 8, 'Purpose:', 0, 0);
+        $pdf->MultiCell(0, 8, $clearance_data['purpose'], 0, 1);
+        
+        $pdf->Cell(45, 8, 'Request Date:', 0, 0);
+        $pdf->Cell(0, 8, date('F d, Y', strtotime($clearance_data['request_date'])), 0, 1);
+        
+        $pdf->Ln(5);
+        
+        // Vital Signs if available
+        if (!empty($clearance_data['vital_signs'])) {
+            $pdf->SetFont('Arial', 'B', 12);
+            $pdf->Cell(0, 10, 'VITAL SIGNS', 0, 1);
+            $pdf->SetFont('Arial', '', 12);
+            $pdf->MultiCell(0, 8, $clearance_data['vital_signs'], 0, 1);
+            $pdf->Ln(5);
+        }
+        
+        // Findings/Assessment
+        if (!empty($clearance_data['findings'])) {
+            $pdf->SetFont('Arial', 'B', 12);
+            $pdf->Cell(0, 10, 'FINDINGS / ASSESSMENT', 0, 1);
+            $pdf->SetFont('Arial', '', 12);
+            $pdf->MultiCell(0, 8, $clearance_data['findings'], 0, 1);
+            $pdf->Ln(5);
+        }
+        
+        if (!empty($clearance_data['assessment'])) {
+            $pdf->SetFont('Arial', 'B', 12);
+            $pdf->Cell(0, 10, 'NURSE\'S ASSESSMENT', 0, 1);
+            $pdf->SetFont('Arial', '', 12);
+            $pdf->MultiCell(0, 8, $clearance_data['assessment'], 0, 1);
+            $pdf->Ln(5);
+        }
+        
+        // Status
+        $pdf->SetFont('Arial', 'B', 14);
+        $status_color = $clearance_data['status'] == 'Approved' ? [30, 123, 92] : ($clearance_data['status'] == 'Not Cleared' ? [196, 69, 69] : [107, 43, 94]);
+        $pdf->SetTextColor($status_color[0], $status_color[1], $status_color[2]);
+        $pdf->Cell(0, 10, 'STATUS: ' . strtoupper($clearance_data['status']), 0, 1);
+        
+        $pdf->SetTextColor(0);
+        
+        if (!empty($clearance_data['recommendations'])) {
+            $pdf->Ln(5);
+            $pdf->SetFont('Arial', 'B', 12);
+            $pdf->Cell(0, 10, 'RECOMMENDATIONS', 0, 1);
+            $pdf->SetFont('Arial', '', 12);
+            $pdf->MultiCell(0, 8, $clearance_data['recommendations'], 0, 1);
+        }
+        
+        if (!empty($clearance_data['restrictions'])) {
+            $pdf->Ln(5);
+            $pdf->SetFont('Arial', 'B', 12);
+            $pdf->Cell(0, 10, 'RESTRICTIONS', 0, 1);
+            $pdf->SetFont('Arial', '', 12);
+            $pdf->MultiCell(0, 8, $clearance_data['restrictions'], 0, 1);
+        }
+        
+        if (!empty($clearance_data['valid_until'])) {
+            $pdf->Ln(5);
+            $pdf->Cell(0, 8, 'Valid until: ' . date('F d, Y', strtotime($clearance_data['valid_until'])), 0, 1);
+        }
+        
+        $pdf->Ln(20);
+        
+        $pdf->Cell(100, 10, '_________________________', 0, 0);
+        $pdf->Cell(90, 10, '_________________________', 0, 1);
+        
+        $pdf->Cell(100, 5, 'Issued By: ' . ($clearance_data['approved_by'] ?? $clearance_data['created_by']), 0, 0);
+        $pdf->Cell(90, 5, 'Clinic Staff Signature', 0, 1);
+        
+        $pdf->Output('F', $filepath);
+        
+        return $filename;
+    } catch (Exception $e) {
+        error_log("PDF Generation error: " . $e->getMessage());
+        return null;
+    }
+}
+
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
     
-    // Create clearance request
+    // Create clearance request with auto-generation
     if ($_POST['action'] == 'create_clearance') {
         try {
+            // Start transaction
+            $db->beginTransaction();
+            
             // Generate clearance code
             $prefix = 'CLR';
             $date = date('Ymd');
             $random = rand(1000, 9999);
             $clearance_code = $prefix . '-' . $date . '-' . $random;
             
+            // Format vital signs
+            $vital_signs = "Temp: " . ($_POST['temperature'] ?? 'N/A') . "°C, " .
+                          "BP: " . ($_POST['blood_pressure'] ?? 'N/A') . ", " .
+                          "HR: " . ($_POST['heart_rate'] ?? 'N/A') . " bpm";
+            
+            // Format findings/assessment
+            $findings = $_POST['findings'] ?? '';
+            $assessment = $_POST['assessment'] ?? '';
+            
             $valid_until = !empty($_POST['valid_until']) ? $_POST['valid_until'] : null;
+            $status = $_POST['status'] ?? 'Approved'; // Default to approved since nurse is issuing
             
             $query = "INSERT INTO clearance_requests (
                 clearance_code, student_id, student_name, grade_section,
-                clearance_type, purpose, request_date, status, valid_until, created_by
+                clearance_type, purpose, request_date, status, 
+                findings, vital_signs, assessment, recommendations, 
+                restrictions, valid_until, created_by
             ) VALUES (
                 :clearance_code, :student_id, :student_name, :grade_section,
-                :clearance_type, :purpose, :request_date, 'Pending', :valid_until, :created_by
+                :clearance_type, :purpose, :request_date, :status,
+                :findings, :vital_signs, :assessment, :recommendations,
+                :restrictions, :valid_until, :created_by
             )";
             
             $stmt = $db->prepare($query);
@@ -141,69 +322,112 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $stmt->bindParam(':clearance_type', $_POST['clearance_type']);
             $stmt->bindParam(':purpose', $_POST['purpose']);
             $stmt->bindParam(':request_date', $_POST['request_date']);
+            $stmt->bindParam(':status', $status);
+            $stmt->bindParam(':findings', $findings);
+            $stmt->bindParam(':vital_signs', $vital_signs);
+            $stmt->bindParam(':assessment', $assessment);
+            $stmt->bindParam(':recommendations', $_POST['recommendations']);
+            $stmt->bindParam(':restrictions', $_POST['restrictions']);
             $stmt->bindParam(':valid_until', $valid_until);
             $stmt->bindParam(':created_by', $current_user_id);
             
             if ($stmt->execute()) {
-                $success_message = "Clearance request created successfully! Code: " . $clearance_code;
+                $clearance_id = $db->lastInsertId();
+                
+                // Update with approved by and date
+                $update_query = "UPDATE clearance_requests 
+                               SET approved_by = :approved_by, 
+                                   approved_date = CURDATE() 
+                               WHERE id = :id";
+                $update_stmt = $db->prepare($update_query);
+                $update_stmt->bindParam(':approved_by', $current_user_fullname);
+                $update_stmt->bindParam(':id', $clearance_id);
+                $update_stmt->execute();
+                
+                // Generate PDF
+                $clearance_data = [
+                    'clearance_code' => $clearance_code,
+                    'clearance_type' => $_POST['clearance_type'],
+                    'purpose' => $_POST['purpose'],
+                    'request_date' => $_POST['request_date'],
+                    'status' => $status,
+                    'findings' => $findings,
+                    'vital_signs' => $vital_signs,
+                    'assessment' => $assessment,
+                    'recommendations' => $_POST['recommendations'],
+                    'restrictions' => $_POST['restrictions'],
+                    'valid_until' => $valid_until,
+                    'created_by' => $current_user_fullname,
+                    'approved_by' => $current_user_fullname
+                ];
+                
+                $student_info = [
+                    'full_name' => $_POST['student_name'],
+                    'student_id' => $_POST['student_id'],
+                    'year_level' => explode(' - ', $_POST['grade_section'])[0] ?? 'N/A',
+                    'section' => explode(' - ', $_POST['grade_section'])[1] ?? 'N/A'
+                ];
+                
+                $pdf_filename = generateClearancePDF($clearance_id, $db, $student_info, $clearance_data);
+                
+                if ($pdf_filename) {
+                    // Update database with PDF path
+                    $pdf_query = "UPDATE clearance_requests SET pdf_path = :pdf_path WHERE id = :id";
+                    $pdf_stmt = $db->prepare($pdf_query);
+                    $pdf_stmt->bindParam(':pdf_path', $pdf_filename);
+                    $pdf_stmt->bindParam(':id', $clearance_id);
+                    $pdf_stmt->execute();
+                }
+                
+                $db->commit();
+                
+                $success_message = "Clearance generated successfully! Code: " . $clearance_code;
+                
+                // Redirect to view the generated clearance
+                echo "<script>window.location.href = '?view=clearance&id=" . $clearance_id . "&student_id=" . urlencode($_POST['student_id']) . "';</script>";
+                exit();
             } else {
+                $db->rollBack();
                 $error_message = "Error creating clearance request.";
             }
-        } catch (PDOException $e) {
-            $error_message = "Database error: " . $e->getMessage();
+        } catch (Exception $e) {
+            $db->rollBack();
+            $error_message = "Error: " . $e->getMessage();
         }
     }
     
-    // Update clearance status
-    if ($_POST['action'] == 'update_clearance') {
-        try {
-            $approved_date = ($_POST['status'] == 'Approved' || $_POST['status'] == 'Not Cleared') ? date('Y-m-d') : null;
-            
-            $query = "UPDATE clearance_requests 
-                      SET status = :status, 
-                          approved_date = :approved_date, 
-                          approved_by = :approved_by, 
-                          remarks = :remarks,
-                          valid_until = :valid_until
-                      WHERE id = :id";
-            
-            $stmt = $db->prepare($query);
-            $stmt->bindParam(':status', $_POST['status']);
-            $stmt->bindParam(':approved_date', $approved_date);
-            $stmt->bindParam(':approved_by', $current_user_fullname);
-            $stmt->bindParam(':remarks', $_POST['remarks']);
-            $stmt->bindParam(':valid_until', $_POST['valid_until']);
-            $stmt->bindParam(':id', $_POST['clearance_id']);
-            
-            if ($stmt->execute()) {
-                $success_message = "Clearance status updated successfully!";
-            } else {
-                $error_message = "Error updating clearance status.";
-            }
-        } catch (PDOException $e) {
-            $error_message = "Database error: " . $e->getMessage();
-        }
-    }
-    
-    // Issue medical certificate
+    // Issue medical certificate with auto-generation
     if ($_POST['action'] == 'issue_certificate') {
         try {
+            $db->beginTransaction();
+            
             // Generate certificate code
             $prefix = 'CERT';
             $date = date('Ymd');
             $random = rand(1000, 9999);
             $certificate_code = $prefix . '-' . $date . '-' . $random;
             
+            // Format vital signs
+            $vital_signs = "Temp: " . ($_POST['temperature'] ?? 'N/A') . "°C, " .
+                          "BP: " . ($_POST['blood_pressure'] ?? 'N/A') . ", " .
+                          "HR: " . ($_POST['heart_rate'] ?? 'N/A') . " bpm";
+            
+            // Format findings/assessment
+            $findings = $_POST['findings'] ?? '';
+            $assessment = $_POST['assessment'] ?? '';
+            
             $valid_until = !empty($_POST['valid_until']) ? $_POST['valid_until'] : null;
             
             $query = "INSERT INTO medical_certificates (
                 certificate_code, student_id, student_name, grade_section,
                 certificate_type, issued_date, valid_until, findings,
-                recommendations, restrictions, issued_by, issuer_id, remarks
+                vital_signs, assessment, recommendations, restrictions,
+                issued_by, issuer_id, remarks
             ) VALUES (
                 :certificate_code, :student_id, :student_name, :grade_section,
                 :certificate_type, :issued_date, :valid_until, :findings,
-                :recommendations, :restrictions, :issued_by, :issuer_id, :remarks
+                :vital_signs, :assessment, :recommendations, :restrictions,
+                :issued_by, :issuer_id, :remarks
             )";
             
             $stmt = $db->prepare($query);
@@ -214,7 +438,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $stmt->bindParam(':certificate_type', $_POST['certificate_type']);
             $stmt->bindParam(':issued_date', $_POST['issued_date']);
             $stmt->bindParam(':valid_until', $valid_until);
-            $stmt->bindParam(':findings', $_POST['findings']);
+            $stmt->bindParam(':findings', $findings);
+            $stmt->bindParam(':vital_signs', $vital_signs);
+            $stmt->bindParam(':assessment', $assessment);
             $stmt->bindParam(':recommendations', $_POST['recommendations']);
             $stmt->bindParam(':restrictions', $_POST['restrictions']);
             $stmt->bindParam(':issued_by', $current_user_fullname);
@@ -223,29 +449,54 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             
             if ($stmt->execute()) {
                 $certificate_id = $db->lastInsertId();
+                
+                // Generate PDF
+                require_once 'generate_certificate_pdf.php';
+                $pdf_filename = generateCertificatePDF($certificate_id, $db, $_POST, $current_user_fullname);
+                
+                if ($pdf_filename) {
+                    // Update database with PDF path
+                    $pdf_query = "UPDATE medical_certificates SET pdf_path = :pdf_path WHERE id = :id";
+                    $pdf_stmt = $db->prepare($pdf_query);
+                    $pdf_stmt->bindParam(':pdf_path', $pdf_filename);
+                    $pdf_stmt->bindParam(':id', $certificate_id);
+                    $pdf_stmt->execute();
+                }
+                
+                $db->commit();
+                
                 $success_message = "Medical certificate issued successfully! Code: " . $certificate_code;
                 
-                // Redirect to PDF generation if requested
-                if (isset($_POST['generate_pdf']) && $_POST['generate_pdf'] == 'yes') {
-                    header('Location: generate_certificate.php?id=' . $certificate_id);
-                    exit();
-                }
+                // Redirect to view the generated certificate
+                echo "<script>window.location.href = '?view=certificate&id=" . $certificate_id . "&student_id=" . urlencode($_POST['student_id']) . "';</script>";
+                exit();
             } else {
+                $db->rollBack();
                 $error_message = "Error issuing medical certificate.";
             }
-        } catch (PDOException $e) {
-            $error_message = "Database error: " . $e->getMessage();
+        } catch (Exception $e) {
+            $db->rollBack();
+            $error_message = "Error: " . $e->getMessage();
         }
     }
     
-    // Create fit-to-return slip
+    // Create fit-to-return slip with auto-generation
     if ($_POST['action'] == 'create_fit_to_return') {
         try {
+            $db->beginTransaction();
+            
             // Generate slip code
             $prefix = 'FTR';
             $date = date('Ymd');
             $random = rand(1000, 9999);
             $slip_code = $prefix . '-' . $date . '-' . $random;
+            
+            // Format findings/assessment
+            $findings = $_POST['findings'] ?? '';
+            $assessment = "Temperature: " . ($_POST['temperature'] ?? 'N/A') . "°C\n" .
+                         "Blood Pressure: " . ($_POST['blood_pressure'] ?? 'N/A') . "\n" .
+                         "Heart Rate: " . ($_POST['heart_rate'] ?? 'N/A') . " bpm\n\n" .
+                         "Findings: " . $findings;
             
             $next_checkup = !empty($_POST['next_checkup_date']) ? $_POST['next_checkup_date'] : null;
             
@@ -253,13 +504,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 slip_code, student_id, student_name, grade_section,
                 absence_days, absence_reason, assessment_date,
                 temperature, blood_pressure, heart_rate,
-                findings, fit_to_return, restrictions,
+                findings, assessment, fit_to_return, restrictions,
                 recommended_rest_days, next_checkup_date, issued_by, issuer_id
             ) VALUES (
                 :slip_code, :student_id, :student_name, :grade_section,
                 :absence_days, :absence_reason, :assessment_date,
                 :temperature, :blood_pressure, :heart_rate,
-                :findings, :fit_to_return, :restrictions,
+                :findings, :assessment, :fit_to_return, :restrictions,
                 :recommended_rest_days, :next_checkup_date, :issued_by, :issuer_id
             )";
             
@@ -274,7 +525,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $stmt->bindParam(':temperature', $_POST['temperature']);
             $stmt->bindParam(':blood_pressure', $_POST['blood_pressure']);
             $stmt->bindParam(':heart_rate', $_POST['heart_rate']);
-            $stmt->bindParam(':findings', $_POST['findings']);
+            $stmt->bindParam(':findings', $findings);
+            $stmt->bindParam(':assessment', $assessment);
             $stmt->bindParam(':fit_to_return', $_POST['fit_to_return']);
             $stmt->bindParam(':restrictions', $_POST['restrictions']);
             $stmt->bindParam(':recommended_rest_days', $_POST['recommended_rest_days']);
@@ -284,18 +536,34 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             
             if ($stmt->execute()) {
                 $slip_id = $db->lastInsertId();
+                
+                // Generate PDF
+                require_once 'generate_fit_to_return_pdf.php';
+                $pdf_filename = generateFitToReturnPDF($slip_id, $db, $_POST, $current_user_fullname);
+                
+                if ($pdf_filename) {
+                    // Update database with PDF path
+                    $pdf_query = "UPDATE fit_to_return_slips SET pdf_path = :pdf_path WHERE id = :id";
+                    $pdf_stmt = $db->prepare($pdf_query);
+                    $pdf_stmt->bindParam(':pdf_path', $pdf_filename);
+                    $pdf_stmt->bindParam(':id', $slip_id);
+                    $pdf_stmt->execute();
+                }
+                
+                $db->commit();
+                
                 $success_message = "Fit-to-return slip created successfully! Code: " . $slip_code;
                 
-                // Redirect to PDF generation if requested
-                if (isset($_POST['generate_pdf']) && $_POST['generate_pdf'] == 'yes') {
-                    header('Location: generate_fit_to_return.php?id=' . $slip_id);
-                    exit();
-                }
+                // Redirect to view the generated slip
+                echo "<script>window.location.href = '?view=fitreturn&id=" . $slip_id . "&student_id=" . urlencode($_POST['student_id']) . "';</script>";
+                exit();
             } else {
+                $db->rollBack();
                 $error_message = "Error creating fit-to-return slip.";
             }
-        } catch (PDOException $e) {
-            $error_message = "Database error: " . $e->getMessage();
+        } catch (Exception $e) {
+            $db->rollBack();
+            $error_message = "Error: " . $e->getMessage();
         }
     }
 }
@@ -750,6 +1018,12 @@ if (!empty($student_id_search)) {
             gap: 12px;
         }
 
+        .form-row-4 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 12px;
+        }
+
         .btn {
             padding: 12px 24px;
             border: none;
@@ -1042,25 +1316,124 @@ if (!empty($student_id_search)) {
             color: #7a4b6b;
         }
 
-        /* PDF Options */
-        .pdf-option {
-            margin-top: 15px;
-            padding: 15px;
-            background: #f0e2ea;
+        /* Document View Modal */
+        .document-modal {
+            display: <?php echo $view_document ? 'flex' : 'none'; ?>;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .document-container {
+            background: white;
+            border-radius: 24px;
+            width: 90%;
+            max-width: 900px;
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .document-header {
+            padding: 20px;
+            border-bottom: 2px solid #f0e2ea;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .document-header h2 {
+            color: #6b2b5e;
+            font-size: 1.3rem;
+        }
+
+        .document-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .document-content {
+            padding: 30px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .document-footer {
+            padding: 20px;
+            border-top: 2px solid #f0e2ea;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #7a4b6b;
+        }
+
+        .close-btn:hover {
+            color: #c44545;
+        }
+
+        .document-field {
+            margin-bottom: 20px;
+        }
+
+        .document-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #7a4b6b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+
+        .document-value {
+            font-size: 1rem;
+            color: #4a2e40;
+            background: #fdf8fa;
+            padding: 12px 16px;
             border-radius: 12px;
             border: 1px solid #e9d0df;
         }
 
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+        .document-value.big {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #6b2b5e;
         }
 
-        .checkbox-group input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            accent-color: #a14a76;
+        .status-box {
+            padding: 20px;
+            border-radius: 16px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 1.2rem;
+            margin: 20px 0;
+        }
+
+        .status-box.approved {
+            background: #d4edda;
+            color: #1e7b5c;
+        }
+
+        .status-box.not-cleared {
+            background: #fde7e9;
+            color: #c44545;
+        }
+
+        .status-box.pending {
+            background: #fff3cd;
+            color: #856404;
         }
 
         @keyframes fadeInUp {
@@ -1095,7 +1468,8 @@ if (!empty($student_id_search)) {
             }
             
             .form-row,
-            .form-row-3 {
+            .form-row-3,
+            .form-row-4 {
                 grid-template-columns: 1fr;
             }
             
@@ -1120,7 +1494,7 @@ if (!empty($student_id_search)) {
             <div class="dashboard-container">
                 <div class="welcome-section">
                     <h1>📋 Health Clearance & Certification</h1>
-                    <p>Manage student clearances, medical certificates, and fit-to-return slips.</p>
+                    <p>Issue clearances, medical certificates, and fit-to-return slips with findings assessment.</p>
                 </div>
 
                 <!-- Alert Messages -->
@@ -1301,14 +1675,14 @@ if (!empty($student_id_search)) {
                 <!-- Tabs Section -->
                 <div class="tabs-section">
                     <div class="tabs-header">
-                        <button class="tab-btn active" data-tab="clearance" onclick="showTab('clearance', event)">📋 Create Clearance</button>
+                        <button class="tab-btn active" data-tab="clearance" onclick="showTab('clearance', event)">📋 Issue Clearance</button>
                         <button class="tab-btn" data-tab="certificate" onclick="showTab('certificate', event)">📄 Issue Certificate</button>
                         <button class="tab-btn" data-tab="fitreturn" onclick="showTab('fitreturn', event)">🔄 Fit-to-Return</button>
                         <button class="tab-btn" data-tab="history" onclick="showTab('history', event)">📚 Clearance History</button>
                     </div>
 
                     <div class="tab-content">
-                        <!-- Create Clearance Tab -->
+                        <!-- Issue Clearance Tab (Auto-generates) -->
                         <div class="tab-pane active" id="clearance">
                             <div class="form-card">
                                 <div class="form-card-title">
@@ -1318,7 +1692,7 @@ if (!empty($student_id_search)) {
                                         <line x1="8" y1="2" x2="8" y2="6"/>
                                         <line x1="3" y1="10" x2="21" y2="10"/>
                                     </svg>
-                                    Create Clearance Request
+                                    Issue Clearance (Auto-generates PDF)
                                 </div>
                                 
                                 <form method="POST" action="">
@@ -1352,15 +1726,53 @@ if (!empty($student_id_search)) {
                                         <textarea name="purpose" class="form-control" placeholder="Why is this clearance needed?" required></textarea>
                                     </div>
                                     
-                                    <div class="form-row">
+                                    <!-- Vital Signs -->
+                                    <div class="form-row-4">
                                         <div class="form-group">
-                                            <label>Valid Until (Optional)</label>
-                                            <input type="date" name="valid_until" class="form-control">
-                                            <small style="color: #7a4b6b; font-size: 0.7rem;">Leave empty if no expiry</small>
+                                            <label>Temperature (°C)</label>
+                                            <input type="number" name="temperature" class="form-control" step="0.1" min="35" max="42" placeholder="36.5">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Blood Pressure</label>
+                                            <input type="text" name="blood_pressure" class="form-control" placeholder="120/80">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Heart Rate</label>
+                                            <input type="number" name="heart_rate" class="form-control" min="40" max="200" placeholder="72">
                                         </div>
                                     </div>
                                     
-                                    <button type="submit" class="btn btn-primary">Create Clearance Request</button>
+                                    <!-- Findings/Assessment -->
+                                    <div class="form-group">
+                                        <label>Findings / Assessment (What the nurse observed)</label>
+                                        <textarea name="findings" class="form-control" placeholder="e.g., Temperature: 37.2°C, Pulse: 88 bpm, Student feels well, no vomiting or fatigue. No signs of contagious illness." required></textarea>
+                                        <small style="color: #7a4b6b;">Be specific: vital signs, observed condition, student's statement</small>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label>Nurse's Evaluation</label>
+                                        <textarea name="assessment" class="form-control" placeholder="e.g., Fit to return to class / Requires rest / Needs parent to pick up" required></textarea>
+                                    </div>
+                                    
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Recommendations</label>
+                                            <input type="text" name="recommendations" class="form-control" placeholder="e.g., Avoid strenuous activities for 24 hours">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Restrictions</label>
+                                            <input type="text" name="restrictions" class="form-control" placeholder="e.g., No PE for 3 days">
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Valid Until</label>
+                                            <input type="date" name="valid_until" class="form-control">
+                                        </div>
+                                    </div>
+                                    
+                                    <button type="submit" class="btn btn-primary">Generate Clearance</button>
                                 </form>
                             </div>
                         </div>
@@ -1400,16 +1812,30 @@ if (!empty($student_id_search)) {
                                         </div>
                                     </div>
                                     
-                                    <div class="form-row">
+                                    <!-- Vital Signs -->
+                                    <div class="form-row-4">
                                         <div class="form-group">
-                                            <label>Valid Until (Optional)</label>
-                                            <input type="date" name="valid_until" class="form-control">
+                                            <label>Temperature (°C)</label>
+                                            <input type="number" name="temperature" class="form-control" step="0.1" min="35" max="42" placeholder="36.5">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Blood Pressure</label>
+                                            <input type="text" name="blood_pressure" class="form-control" placeholder="120/80">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Heart Rate</label>
+                                            <input type="number" name="heart_rate" class="form-control" min="40" max="200" placeholder="72">
                                         </div>
                                     </div>
                                     
                                     <div class="form-group">
                                         <label>Findings / Assessment</label>
-                                        <textarea name="findings" class="form-control" placeholder="Clinical findings..." required></textarea>
+                                        <textarea name="findings" class="form-control" placeholder="e.g., Student examined, vital signs normal, no signs of illness" required></textarea>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label>Nurse's Assessment</label>
+                                        <textarea name="assessment" class="form-control" placeholder="e.g., Fit to participate in school activities" required></textarea>
                                     </div>
                                     
                                     <div class="form-group">
@@ -1422,19 +1848,19 @@ if (!empty($student_id_search)) {
                                         <input type="text" name="restrictions" class="form-control" placeholder="e.g., No strenuous activities for 1 week">
                                     </div>
                                     
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Valid Until</label>
+                                            <input type="date" name="valid_until" class="form-control">
+                                        </div>
+                                    </div>
+                                    
                                     <div class="form-group">
                                         <label>Additional Remarks</label>
                                         <textarea name="remarks" class="form-control" placeholder="Any additional notes..."></textarea>
                                     </div>
                                     
-                                    <div class="pdf-option">
-                                        <div class="checkbox-group">
-                                            <input type="checkbox" name="generate_pdf" id="generate_pdf_cert" value="yes" checked>
-                                            <label for="generate_pdf_cert">Generate PDF certificate immediately</label>
-                                        </div>
-                                    </div>
-                                    
-                                    <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Issue Certificate</button>
+                                    <button type="submit" class="btn btn-primary">Issue Certificate</button>
                                 </form>
                             </div>
                         </div>
@@ -1471,7 +1897,7 @@ if (!empty($student_id_search)) {
                                         <textarea name="absence_reason" class="form-control" placeholder="Why was the student absent?"></textarea>
                                     </div>
                                     
-                                    <div class="form-row-3">
+                                    <div class="form-row-4">
                                         <div class="form-group">
                                             <label>Temperature (°C)</label>
                                             <input type="number" name="temperature" class="form-control" step="0.1" min="35" max="42" placeholder="36.5">
@@ -1518,14 +1944,7 @@ if (!empty($student_id_search)) {
                                         </div>
                                     </div>
                                     
-                                    <div class="pdf-option">
-                                        <div class="checkbox-group">
-                                            <input type="checkbox" name="generate_pdf" id="generate_pdf_ftr" value="yes" checked>
-                                            <label for="generate_pdf_ftr">Generate PDF fit-to-return slip</label>
-                                        </div>
-                                    </div>
-                                    
-                                    <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Create Fit-to-Return Slip</button>
+                                    <button type="submit" class="btn btn-primary">Create Fit-to-Return Slip</button>
                                 </form>
                             </div>
                         </div>
@@ -1544,10 +1963,11 @@ if (!empty($student_id_search)) {
                                         <tr>
                                             <th>Code</th>
                                             <th>Type</th>
-                                            <th>Request Date</th>
-                                            <th>Purpose</th>
+                                            <th>Date</th>
+                                            <th>Findings</th>
                                             <th>Status</th>
                                             <th>Valid Until</th>
+                                            <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1562,7 +1982,7 @@ if (!empty($student_id_search)) {
                                                     <td><span class="clearance-code"><?php echo htmlspecialchars($clearance['clearance_code']); ?></span></td>
                                                     <td><?php echo $clearance['clearance_type']; ?></td>
                                                     <td><?php echo date('M d, Y', strtotime($clearance['request_date'])); ?></td>
-                                                    <td><?php echo htmlspecialchars(substr($clearance['purpose'], 0, 30)) . '...'; ?></td>
+                                                    <td><?php echo htmlspecialchars(substr($clearance['findings'] ?? '', 0, 30)) . '...'; ?></td>
                                                     <td>
                                                         <span class="status-badge status-<?php echo strtolower($clearance['status']); ?>">
                                                             <?php echo $clearance['status']; ?>
@@ -1571,11 +1991,14 @@ if (!empty($student_id_search)) {
                                                     <td>
                                                         <?php echo !empty($clearance['valid_until']) ? date('M d, Y', strtotime($clearance['valid_until'])) : 'No expiry'; ?>
                                                     </td>
+                                                    <td>
+                                                        <button class="btn btn-sm btn-secondary" onclick="viewDocument('clearance', <?php echo $clearance['id']; ?>)">View</button>
+                                                    </td>
                                                 </tr>
                                             <?php endforeach; ?>
                                         <?php else: ?>
                                             <tr>
-                                                <td colspan="6" class="empty-state">
+                                                <td colspan="7" class="empty-state">
                                                     <p>No clearance requests found</p>
                                                 </td>
                                             </tr>
@@ -1596,6 +2019,7 @@ if (!empty($student_id_search)) {
                                             <th>Findings</th>
                                             <th>Valid Until</th>
                                             <th>Issued By</th>
+                                            <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1605,16 +2029,19 @@ if (!empty($student_id_search)) {
                                                     <td><span class="clearance-code"><?php echo htmlspecialchars($cert['certificate_code']); ?></span></td>
                                                     <td><?php echo $cert['certificate_type']; ?></td>
                                                     <td><?php echo date('M d, Y', strtotime($cert['issued_date'])); ?></td>
-                                                    <td><?php echo htmlspecialchars(substr($cert['findings'], 0, 30)) . '...'; ?></td>
+                                                    <td><?php echo htmlspecialchars(substr($cert['findings'] ?? '', 0, 30)) . '...'; ?></td>
                                                     <td>
                                                         <?php echo !empty($cert['valid_until']) ? date('M d, Y', strtotime($cert['valid_until'])) : 'No expiry'; ?>
                                                     </td>
                                                     <td><?php echo htmlspecialchars($cert['issued_by']); ?></td>
+                                                    <td>
+                                                        <button class="btn btn-sm btn-secondary" onclick="viewDocument('certificate', <?php echo $cert['id']; ?>)">View</button>
+                                                    </td>
                                                 </tr>
                                             <?php endforeach; ?>
                                         <?php else: ?>
                                             <tr>
-                                                <td colspan="6" class="empty-state">
+                                                <td colspan="7" class="empty-state">
                                                     <p>No medical certificates found</p>
                                                 </td>
                                             </tr>
@@ -1635,6 +2062,7 @@ if (!empty($student_id_search)) {
                                             <th>Fit to Return</th>
                                             <th>Restrictions</th>
                                             <th>Issued By</th>
+                                            <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1643,7 +2071,7 @@ if (!empty($student_id_search)) {
                                                 <tr>
                                                     <td><span class="clearance-code"><?php echo htmlspecialchars($slip['slip_code']); ?></span></td>
                                                     <td><?php echo date('M d, Y', strtotime($slip['assessment_date'])); ?></td>
-                                                    <td><?php echo htmlspecialchars(substr($slip['findings'], 0, 30)) . '...'; ?></td>
+                                                    <td><?php echo htmlspecialchars(substr($slip['findings'] ?? '', 0, 30)) . '...'; ?></td>
                                                     <td>
                                                         <span class="status-badge status-<?php echo strtolower($slip['fit_to_return']); ?>">
                                                             <?php echo $slip['fit_to_return']; ?>
@@ -1651,11 +2079,14 @@ if (!empty($student_id_search)) {
                                                     </td>
                                                     <td><?php echo htmlspecialchars($slip['restrictions'] ?: 'None'); ?></td>
                                                     <td><?php echo htmlspecialchars($slip['issued_by']); ?></td>
+                                                    <td>
+                                                        <button class="btn btn-sm btn-secondary" onclick="viewDocument('fitreturn', <?php echo $slip['id']; ?>)">View</button>
+                                                    </td>
                                                 </tr>
                                             <?php endforeach; ?>
                                         <?php else: ?>
                                             <tr>
-                                                <td colspan="6" class="empty-state">
+                                                <td colspan="7" class="empty-state">
                                                     <p>No fit-to-return slips found</p>
                                                 </td>
                                             </tr>
@@ -1688,7 +2119,8 @@ if (!empty($student_id_search)) {
                                             <th>Student</th>
                                             <th>Type</th>
                                             <th>Request Date</th>
-                                            <th>Purpose</th>
+                                            <th>Findings</th>
+                                            <th>Status</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
@@ -1702,11 +2134,12 @@ if (!empty($student_id_search)) {
                                                 </td>
                                                 <td><?php echo $clearance['clearance_type']; ?></td>
                                                 <td><?php echo date('M d, Y', strtotime($clearance['request_date'])); ?></td>
-                                                <td><?php echo htmlspecialchars(substr($clearance['purpose'], 0, 30)) . '...'; ?></td>
+                                                <td><?php echo htmlspecialchars(substr($clearance['findings'] ?? '', 0, 30)) . '...'; ?></td>
                                                 <td>
-                                                    <div class="action-buttons">
-                                                        <button class="btn btn-sm btn-secondary" onclick="openUpdateModal(<?php echo $clearance['id']; ?>, '<?php echo $clearance['clearance_code']; ?>', '<?php echo addslashes($clearance['student_name']); ?>')">Update</button>
-                                                    </div>
+                                                    <span class="status-badge status-pending">Pending</span>
+                                                </td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-secondary" onclick="viewDocument('clearance', <?php echo $clearance['id']; ?>)">View</button>
                                                 </td>
                                             </tr>
                                         <?php endforeach; ?>
@@ -1725,8 +2158,9 @@ if (!empty($student_id_search)) {
                                             <th>Student</th>
                                             <th>Type</th>
                                             <th>Approved Date</th>
-                                            <th>Approved By</th>
-                                            <th>Valid Until</th>
+                                            <th>Findings</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1739,8 +2173,13 @@ if (!empty($student_id_search)) {
                                                 </td>
                                                 <td><?php echo $clearance['clearance_type']; ?></td>
                                                 <td><?php echo date('M d, Y', strtotime($clearance['approved_date'])); ?></td>
-                                                <td><?php echo htmlspecialchars($clearance['approved_by']); ?></td>
-                                                <td><?php echo !empty($clearance['valid_until']) ? date('M d, Y', strtotime($clearance['valid_until'])) : 'No expiry'; ?></td>
+                                                <td><?php echo htmlspecialchars(substr($clearance['findings'] ?? '', 0, 30)) . '...'; ?></td>
+                                                <td>
+                                                    <span class="status-badge status-approved">Approved</span>
+                                                </td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-secondary" onclick="viewDocument('clearance', <?php echo $clearance['id']; ?>)">View</button>
+                                                </td>
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>
@@ -1758,8 +2197,8 @@ if (!empty($student_id_search)) {
                                             <th>Student</th>
                                             <th>Type</th>
                                             <th>Issue Date</th>
-                                            <th>Issued By</th>
-                                            <th>Valid Until</th>
+                                            <th>Findings</th>
+                                            <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1772,8 +2211,10 @@ if (!empty($student_id_search)) {
                                                 </td>
                                                 <td><?php echo $cert['certificate_type']; ?></td>
                                                 <td><?php echo date('M d, Y', strtotime($cert['issued_date'])); ?></td>
-                                                <td><?php echo htmlspecialchars($cert['issued_by']); ?></td>
-                                                <td><?php echo !empty($cert['valid_until']) ? date('M d, Y', strtotime($cert['valid_until'])) : 'No expiry'; ?></td>
+                                                <td><?php echo htmlspecialchars(substr($cert['findings'] ?? '', 0, 30)) . '...'; ?></td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-secondary" onclick="viewDocument('certificate', <?php echo $cert['id']; ?>)">View</button>
+                                                </td>
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>
@@ -1787,46 +2228,169 @@ if (!empty($student_id_search)) {
         </div>
     </div>
 
-    <!-- Update Clearance Modal -->
-    <div id="updateModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 1000;">
-        <div style="background: white; border-radius: 20px; padding: 30px; max-width: 500px; width: 90%;">
-            <h3 style="color: #6b2b5e; margin-bottom: 20px;">Update Clearance Status</h3>
-            <form method="POST" action="">
-                <input type="hidden" name="action" value="update_clearance">
-                <input type="hidden" name="clearance_id" id="modal_clearance_id">
-                
-                <div style="margin-bottom: 15px;">
-                    <strong>Student:</strong> <span id="modal_student_name"></span><br>
-                    <strong>Code:</strong> <span id="modal_clearance_code"></span>
+    <!-- Document View Modal -->
+    <?php if ($view_document && $view_id): 
+        // Fetch document details
+        $doc_data = null;
+        if ($view_document == 'clearance') {
+            $query = "SELECT c.*, u.full_name as creator_name 
+                     FROM clearance_requests c
+                     LEFT JOIN users u ON c.created_by = u.id
+                     WHERE c.id = :id";
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':id', $view_id);
+            $stmt->execute();
+            $doc_data = $stmt->fetch(PDO::FETCH_ASSOC);
+            $doc_title = "Clearance Document";
+        } elseif ($view_document == 'certificate') {
+            $query = "SELECT * FROM medical_certificates WHERE id = :id";
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':id', $view_id);
+            $stmt->execute();
+            $doc_data = $stmt->fetch(PDO::FETCH_ASSOC);
+            $doc_title = "Medical Certificate";
+        } elseif ($view_document == 'fitreturn') {
+            $query = "SELECT * FROM fit_to_return_slips WHERE id = :id";
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':id', $view_id);
+            $stmt->execute();
+            $doc_data = $stmt->fetch(PDO::FETCH_ASSOC);
+            $doc_title = "Fit-to-Return Slip";
+        }
+    ?>
+    <div class="document-modal" id="documentModal">
+        <div class="document-container">
+            <div class="document-header">
+                <h2><?php echo $doc_title; ?> - <?php echo htmlspecialchars($doc_data[$view_document == 'clearance' ? 'clearance_code' : ($view_document == 'certificate' ? 'certificate_code' : 'slip_code')]); ?></h2>
+                <div class="document-actions">
+                    <?php if (!empty($doc_data['pdf_path'])): ?>
+                        <a href="../uploads/clearances/<?php echo $doc_data['pdf_path']; ?>" target="_blank" class="btn btn-sm btn-primary">Download PDF</a>
+                    <?php endif; ?>
+                    <button class="close-btn" onclick="closeDocumentModal()">&times;</button>
+                </div>
+            </div>
+            <div class="document-content">
+                <!-- Student Information -->
+                <div class="document-field">
+                    <div class="document-label">Student Information</div>
+                    <div class="document-value">
+                        <strong><?php echo htmlspecialchars($doc_data['student_name']); ?></strong><br>
+                        Student ID: <?php echo htmlspecialchars($doc_data['student_id']); ?><br>
+                        Grade/Section: <?php echo htmlspecialchars($doc_data['grade_section']); ?>
+                    </div>
                 </div>
                 
-                <div class="form-group">
-                    <label>Status</label>
-                    <select name="status" class="form-control" required>
-                        <option value="Approved">Approve</option>
-                        <option value="Not Cleared">Not Cleared</option>
-                        <option value="Pending">Keep Pending</option>
-                        <option value="Expired">Mark as Expired</option>
-                    </select>
+                <!-- Document Details -->
+                <div class="document-field">
+                    <div class="document-label">Document Details</div>
+                    <div class="document-value">
+                        <?php if ($view_document == 'clearance'): ?>
+                            <strong>Type:</strong> <?php echo $doc_data['clearance_type']; ?><br>
+                            <strong>Purpose:</strong> <?php echo nl2br(htmlspecialchars($doc_data['purpose'])); ?><br>
+                            <strong>Request Date:</strong> <?php echo date('F d, Y', strtotime($doc_data['request_date'])); ?>
+                        <?php elseif ($view_document == 'certificate'): ?>
+                            <strong>Type:</strong> <?php echo $doc_data['certificate_type']; ?><br>
+                            <strong>Issue Date:</strong> <?php echo date('F d, Y', strtotime($doc_data['issued_date'])); ?>
+                        <?php else: ?>
+                            <strong>Assessment Date:</strong> <?php echo date('F d, Y', strtotime($doc_data['assessment_date'])); ?><br>
+                            <?php if ($doc_data['absence_days']): ?>
+                                <strong>Absence Days:</strong> <?php echo $doc_data['absence_days']; ?><br>
+                            <?php endif; ?>
+                            <?php if ($doc_data['absence_reason']): ?>
+                                <strong>Reason:</strong> <?php echo nl2br(htmlspecialchars($doc_data['absence_reason'])); ?>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 
-                <div class="form-group">
-                    <label>Valid Until (if approved)</label>
-                    <input type="date" name="valid_until" class="form-control">
+                <!-- Vital Signs -->
+                <?php if (!empty($doc_data['vital_signs']) || !empty($doc_data['temperature'])): ?>
+                <div class="document-field">
+                    <div class="document-label">Vital Signs</div>
+                    <div class="document-value">
+                        <?php if (!empty($doc_data['vital_signs'])): ?>
+                            <?php echo nl2br(htmlspecialchars($doc_data['vital_signs'])); ?>
+                        <?php else: ?>
+                            Temp: <?php echo $doc_data['temperature'] ?? 'N/A'; ?>°C, 
+                            BP: <?php echo $doc_data['blood_pressure'] ?? 'N/A'; ?>, 
+                            HR: <?php echo $doc_data['heart_rate'] ?? 'N/A'; ?> bpm
+                        <?php endif; ?>
+                    </div>
                 </div>
+                <?php endif; ?>
                 
-                <div class="form-group">
-                    <label>Remarks</label>
-                    <textarea name="remarks" class="form-control" placeholder="Add remarks..."></textarea>
+                <!-- Findings -->
+                <?php if (!empty($doc_data['findings'])): ?>
+                <div class="document-field">
+                    <div class="document-label">Findings / Assessment</div>
+                    <div class="document-value">
+                        <?php echo nl2br(htmlspecialchars($doc_data['findings'])); ?>
+                    </div>
                 </div>
+                <?php endif; ?>
                 
-                <div style="display: flex; gap: 10px; margin-top: 20px;">
-                    <button type="submit" class="btn btn-primary" style="flex: 1;">Update Status</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeUpdateModal()" style="flex: 1;">Cancel</button>
+                <!-- Assessment -->
+                <?php if (!empty($doc_data['assessment'])): ?>
+                <div class="document-field">
+                    <div class="document-label">Nurse's Assessment</div>
+                    <div class="document-value">
+                        <?php echo nl2br(htmlspecialchars($doc_data['assessment'])); ?>
+                    </div>
                 </div>
-            </form>
+                <?php endif; ?>
+                
+                <!-- Status -->
+                <?php if ($view_document == 'clearance'): ?>
+                <div class="status-box <?php echo strtolower($doc_data['status']); ?>">
+                    STATUS: <?php echo strtoupper($doc_data['status']); ?>
+                </div>
+                <?php elseif ($view_document == 'fitreturn'): ?>
+                <div class="status-box <?php echo strtolower($doc_data['fit_to_return']); ?>">
+                    FIT TO RETURN: <?php echo strtoupper($doc_data['fit_to_return']); ?>
+                </div>
+                <?php endif; ?>
+                
+                <!-- Recommendations & Restrictions -->
+                <?php if (!empty($doc_data['recommendations'])): ?>
+                <div class="document-field">
+                    <div class="document-label">Recommendations</div>
+                    <div class="document-value"><?php echo nl2br(htmlspecialchars($doc_data['recommendations'])); ?></div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if (!empty($doc_data['restrictions'])): ?>
+                <div class="document-field">
+                    <div class="document-label">Restrictions</div>
+                    <div class="document-value"><?php echo nl2br(htmlspecialchars($doc_data['restrictions'])); ?></div>
+                </div>
+                <?php endif; ?>
+                
+                <!-- Validity -->
+                <?php if (!empty($doc_data['valid_until'])): ?>
+                <div class="document-field">
+                    <div class="document-label">Valid Until</div>
+                    <div class="document-value"><?php echo date('F d, Y', strtotime($doc_data['valid_until'])); ?></div>
+                </div>
+                <?php endif; ?>
+                
+                <!-- Issued By -->
+                <div class="document-field">
+                    <div class="document-label">Issued By</div>
+                    <div class="document-value">
+                        <?php echo htmlspecialchars($doc_data['issued_by'] ?? $doc_data['approved_by'] ?? $doc_data['creator_name'] ?? 'Clinic Staff'); ?>
+                    </div>
+                </div>
+            </div>
+            <div class="document-footer">
+                <button class="btn btn-secondary" onclick="closeDocumentModal()">Close</button>
+            </div>
         </div>
     </div>
+    <script>
+        document.getElementById('documentModal').style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    </script>
+    <?php endif; ?>
 
     <script>
         // Sidebar toggle
@@ -1867,16 +2431,26 @@ if (!empty($student_id_search)) {
             event.target.classList.add('active');
         }
 
-        // Modal functions
-        function openUpdateModal(id, code, name) {
-            document.getElementById('modal_clearance_id').value = id;
-            document.getElementById('modal_clearance_code').textContent = code;
-            document.getElementById('modal_student_name').textContent = name;
-            document.getElementById('updateModal').style.display = 'flex';
+        // View document function
+        function viewDocument(type, id) {
+            const url = new URL(window.location.href);
+            url.searchParams.set('view', type);
+            url.searchParams.set('id', id);
+            window.location.href = url.toString();
         }
 
-        function closeUpdateModal() {
-            document.getElementById('updateModal').style.display = 'none';
+        // Close document modal
+        function closeDocumentModal() {
+            const modal = document.getElementById('documentModal');
+            if (modal) {
+                modal.style.display = 'none';
+                document.body.style.overflow = 'auto';
+                // Remove view parameters from URL
+                const url = new URL(window.location.href);
+                url.searchParams.delete('view');
+                url.searchParams.delete('id');
+                window.history.replaceState({}, '', url.toString());
+            }
         }
 
         // Auto-hide alerts
