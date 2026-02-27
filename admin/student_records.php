@@ -15,6 +15,36 @@ $db = $database->getConnection();
 $student_data = null;
 $search_error = '';
 $student_id_search = isset($_GET['student_id']) ? $_GET['student_id'] : '';
+$show_verification_modal = false;
+
+// Check if verification was completed
+if (isset($_SESSION['verified_student_id']) && $_SESSION['verified_student_id'] === $student_id_search) {
+    $show_verification_modal = false;
+} elseif (!empty($student_id_search)) {
+    $show_verification_modal = true;
+}
+
+// Handle verification submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['verify_access'])) {
+    $user_id = $_SESSION['user_id'];
+    $password = $_POST['password'];
+    
+    // Verify password
+    $query = "SELECT password FROM users WHERE id = :user_id";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':user_id', $user_id);
+    $stmt->execute();
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($user && password_verify($password, $user['password'])) {
+        $_SESSION['verified_student_id'] = $_POST['student_id'];
+        header("Location: " . strtok($_SERVER["REQUEST_URI"], '?') . "?student_id=" . urlencode($_POST['student_id']));
+        exit();
+    } else {
+        $verification_error = "Invalid password. Access denied.";
+        $show_verification_modal = true;
+    }
+}
 
 // Initialize stats with default values
 $stats = [
@@ -150,8 +180,8 @@ function getClearanceHistory($db, $student_id) {
     }
 }
 
-// Search for student if ID provided
-if (!empty($student_id_search)) {
+// Search for student if ID provided and verified
+if (!empty($student_id_search) && isset($_SESSION['verified_student_id']) && $_SESSION['verified_student_id'] === $student_id_search) {
     $api_url = "https://ttm.qcprotektado.com/api/students.php";
     
     // Initialize cURL
@@ -186,13 +216,24 @@ if (!empty($student_id_search)) {
             
             if (!$found) {
                 $search_error = "Student ID not found in the system.";
+                unset($_SESSION['verified_student_id']);
             }
         } else {
             $search_error = "Unable to fetch student data.";
+            unset($_SESSION['verified_student_id']);
         }
     } else {
         $search_error = "Error connecting to student database. Please try again later.";
+        unset($_SESSION['verified_student_id']);
     }
+} elseif (!empty($student_id_search) && (!isset($_SESSION['verified_student_id']) || $_SESSION['verified_student_id'] !== $student_id_search)) {
+    // Don't fetch data, just show verification modal
+    $show_verification_modal = true;
+}
+
+// Clear verification if no student ID
+if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
+    unset($_SESSION['verified_student_id']);
 }
 ?>
 <!DOCTYPE html>
@@ -539,6 +580,164 @@ if (!empty($student_id_search)) {
             border-radius: 20px;
             font-size: 0.8rem;
             font-weight: 600;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-container {
+            background: white;
+            border-radius: 24px;
+            width: 90%;
+            max-width: 450px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            animation: slideUp 0.3s ease;
+        }
+
+        .modal-icon {
+            width: 70px;
+            height: 70px;
+            background: #191970;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            color: white;
+        }
+
+        .modal-icon svg {
+            width: 35px;
+            height: 35px;
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #191970;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .modal-subtitle {
+            color: #546e7a;
+            text-align: center;
+            margin-bottom: 25px;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .modal-form {
+            margin-top: 20px;
+        }
+
+        .modal-form .form-group {
+            margin-bottom: 20px;
+        }
+
+        .modal-form label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #546e7a;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .modal-form .form-control {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 1rem;
+            border: 2px solid #cfd8dc;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .modal-form .form-control:focus {
+            outline: none;
+            border-color: #191970;
+            box-shadow: 0 0 0 3px rgba(25, 25, 112, 0.1);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 25px;
+        }
+
+        .modal-btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .modal-btn.primary {
+            background: #191970;
+            color: white;
+        }
+
+        .modal-btn.primary:hover {
+            background: #24248f;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.2);
+        }
+
+        .modal-btn.secondary {
+            background: #eceff1;
+            color: #37474f;
+        }
+
+        .modal-btn.secondary:hover {
+            background: #cfd8dc;
+        }
+
+        .modal-error {
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            border-radius: 12px;
+            padding: 12px 16px;
+            color: #c62828;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* Tabs */
@@ -984,7 +1183,12 @@ if (!empty($student_id_search)) {
                             <div class="info-label">Emergency Contact</div>
                             <div class="info-value small">
                                 <?php echo htmlspecialchars($student_data['emergency_contact'] ?? 'No contact name'); ?><br>
-                                📞 <?php echo htmlspecialchars($student_data['emergency_phone'] ?? 'No phone'); ?>
+                                📞 <?php echo htmlspecialchars($student_data['emergency_phone'] ?? 'No phone'); ?><br>
+                                <?php if (!empty($student_data['emergency_email'])): ?>
+                                    📧 <?php echo htmlspecialchars($student_data['emergency_email']); ?>
+                                <?php else: ?>
+                                    📧 No emergency email
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
@@ -1243,6 +1447,68 @@ if (!empty($student_id_search)) {
             </div>
         </div>
     </div>
+
+    <!-- Security Verification Modal -->
+    <?php if ($show_verification_modal && !empty($student_id_search)): ?>
+    <div class="modal-overlay" id="verificationModal">
+        <div class="modal-container">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+            </div>
+            <h2 class="modal-title">Secure Access Required</h2>
+            <p class="modal-subtitle">
+                You are accessing confidential medical records for<br>
+                <strong>Student ID: <?php echo htmlspecialchars($student_id_search); ?></strong>
+            </p>
+            
+            <?php if (isset($verification_error)): ?>
+                <div class="modal-error">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <?php echo $verification_error; ?>
+                </div>
+            <?php endif; ?>
+            
+            <form method="POST" action="" class="modal-form">
+                <input type="hidden" name="student_id" value="<?php echo htmlspecialchars($student_id_search); ?>">
+                <div class="form-group">
+                    <label for="password">Enter Your Password to Continue</label>
+                    <input type="password" class="form-control" id="password" name="password" 
+                           placeholder="••••••••" required autofocus>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn secondary" onclick="cancelAccess()">Cancel</button>
+                    <button type="submit" name="verify_access" class="modal-btn primary">Verify & Access</button>
+                </div>
+            </form>
+            <p style="text-align: center; margin-top: 20px; font-size: 0.8rem; color: #78909c;">
+                This helps us maintain confidentiality of student records
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        // Prevent background scrolling when modal is open
+        document.body.style.overflow = 'hidden';
+        
+        function cancelAccess() {
+            window.location.href = window.location.pathname; // Redirect to same page without query string
+        }
+        
+        // Close modal when clicking outside (optional)
+        document.getElementById('verificationModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                cancelAccess();
+            }
+        });
+    </script>
+    <?php endif; ?>
 
     <script>
         // Sidebar toggle sync
