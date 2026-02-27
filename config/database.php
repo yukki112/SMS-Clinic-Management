@@ -1,10 +1,10 @@
 <?php
 // config/database.php
 class Database {
-    private $host = "localhost:3307";
-    private $db_name = "clinic_management";
-    private $username = "root";
-    private $password = "";
+    private $host = "localhost";
+    private $db_name = "clinic";
+    private $username = "clinic";
+    private $password = "Admin123";
     public $conn;
 
     public function getConnection() {
