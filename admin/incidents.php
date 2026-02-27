@@ -97,13 +97,13 @@ function sendIncidentNotification($student, $incident_data, $incident_code, $db,
         $staff = $staff_stmt->fetch(PDO::FETCH_ASSOC);
 
         $mail = new PHPMailer(true);
-
+         
         // Server settings - UPDATE THESE WITH YOUR EMAIL CONFIGURATION
         $mail->isSMTP();
         $mail->Host       = 'smtp.gmail.com'; // Your SMTP server
         $mail->SMTPAuth   = true;
-        $mail->Username   = 'your-email@gmail.com'; // Your email
-        $mail->Password   = 'your-app-password'; // Your app password
+        $mail->Username   = 'Stephenviray12@gmail.com'; // Your email
+        $mail->Password   = 'bubr nckn tgqf lvus'; // Your app password
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
 
