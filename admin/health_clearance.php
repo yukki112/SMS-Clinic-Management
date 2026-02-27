@@ -3,8 +3,6 @@ session_start();
 require_once '../config/database.php';
 require_once '../vendor/autoload.php';
 
-
-
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
     header('Location: ../login.php');
@@ -37,7 +35,7 @@ $generated_pdf = '';
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
     
-    // Create clearance request
+    // Create clearance request (Auto-approved)
     if ($_POST['action'] == 'create_clearance') {
         try {
             // Generate clearance code
@@ -47,13 +45,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $clearance_code = $prefix . '-' . $date . '-' . $random;
             
             $valid_until = !empty($_POST['valid_until']) ? $_POST['valid_until'] : null;
+            $current_date = date('Y-m-d');
             
+            // Insert as APPROVED immediately (since student walks in and gets clearance)
             $query = "INSERT INTO clearance_requests (
                 clearance_code, student_id, student_name, grade_section,
-                clearance_type, purpose, request_date, status, valid_until, created_by
+                clearance_type, purpose, request_date, status, 
+                approved_date, approved_by, valid_until, created_by
             ) VALUES (
                 :clearance_code, :student_id, :student_name, :grade_section,
-                :clearance_type, :purpose, :request_date, 'Pending', :valid_until, :created_by
+                :clearance_type, :purpose, :request_date, 'Approved', 
+                :approved_date, :approved_by, :valid_until, :created_by
             )";
             
             $stmt = $db->prepare($query);
@@ -64,12 +66,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $stmt->bindParam(':clearance_type', $_POST['clearance_type']);
             $stmt->bindParam(':purpose', $_POST['purpose']);
             $stmt->bindParam(':request_date', $_POST['request_date']);
+            $stmt->bindParam(':approved_date', $current_date);
+            $stmt->bindParam(':approved_by', $current_user_fullname);
             $stmt->bindParam(':valid_until', $valid_until);
             $stmt->bindParam(':created_by', $current_user_id);
             
             if ($stmt->execute()) {
                 $clearance_id = $db->lastInsertId();
-                $success_message = "Clearance request created successfully! Code: " . $clearance_code;
+                $success_message = "Clearance approved successfully! Code: " . $clearance_code;
                 
                 // Automatically generate PDF
                 $generated_pdf = 'generate_clearance.php?id=' . $clearance_id;
@@ -84,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         }
     }
     
-    // Update clearance status
+    // Update clearance status (if needed for other scenarios)
     if ($_POST['action'] == 'update_clearance') {
         try {
             $approved_date = ($_POST['status'] == 'Approved' || $_POST['status'] == 'Not Cleared') ? date('Y-m-d') : null;
@@ -234,11 +238,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
 $stats = [];
 
 try {
-    // Pending clearances
-    $query = "SELECT COUNT(*) as total FROM clearance_requests WHERE status = 'Pending'";
+    // Today's approved clearances
+    $query = "SELECT COUNT(*) as total FROM clearance_requests WHERE DATE(approved_date) = CURDATE()";
     $stmt = $db->query($query);
     $result = $stmt->fetch(PDO::FETCH_ASSOC);
-    $stats['pending_clearances'] = $result ? $result['total'] : 0;
+    $stats['today_clearances'] = $result ? $result['total'] : 0;
     
     // Approved clearances this month
     $query = "SELECT COUNT(*) as total FROM clearance_requests 
@@ -270,7 +274,7 @@ try {
 } catch (PDOException $e) {
     error_log("Error fetching stats: " . $e->getMessage());
     $stats = [
-        'pending_clearances' => 0,
+        'today_clearances' => 0,
         'approved_this_month' => 0,
         'certificates_today' => 0,
         'fit_to_return_today' => 0,
@@ -338,7 +342,6 @@ function getFitToReturnSlips($db, $student_id = null) {
     }
 }
 
-$pending_clearances = getClearanceRequests($db, 'Pending');
 $approved_clearances = getClearanceRequests($db, 'Approved');
 $all_certificates = getMedicalCertificates($db);
 $all_fit_to_return = getFitToReturnSlips($db);
@@ -615,14 +618,14 @@ if (!empty($student_id_search)) {
             font-weight: 600;
         }
 
-        .status-pending {
-            background: #fff3cd;
-            color: #856404;
-        }
-
         .status-approved {
             background: #d4edda;
             color: #1e7b5c;
+        }
+
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
         }
 
         .status-not-cleared {
@@ -1084,7 +1087,7 @@ if (!empty($student_id_search)) {
             <div class="dashboard-container">
                 <div class="welcome-section">
                     <h1>📋 Health Clearance & Certification</h1>
-                    <p>Create clearance requests, issue medical certificates, and generate fit-to-return slips.</p>
+                    <p>Issue immediate clearances for walk-in students with auto-generated PDF.</p>
                 </div>
 
                 <!-- Alert Messages -->
@@ -1112,18 +1115,18 @@ if (!empty($student_id_search)) {
                 <!-- Stats Grid -->
                 <div class="stats-grid">
                     <div class="stat-card">
-                        <div class="stat-icon">⏳</div>
+                        <div class="stat-icon">✅</div>
                         <div class="stat-info">
-                            <h3><?php echo $stats['pending_clearances']; ?></h3>
-                            <p>Pending Clearances</p>
+                            <h3><?php echo $stats['today_clearances']; ?></h3>
+                            <p>Today's Clearances</p>
                         </div>
                     </div>
 
                     <div class="stat-card">
-                        <div class="stat-icon">✅</div>
+                        <div class="stat-icon">📊</div>
                         <div class="stat-info">
                             <h3><?php echo $stats['approved_this_month']; ?></h3>
-                            <p>Approved This Month</p>
+                            <p>This Month</p>
                         </div>
                     </div>
 
@@ -1183,23 +1186,23 @@ if (!empty($student_id_search)) {
                             </div>
                         <?php endif; ?>
 
-                        <!-- Pending Clearances List -->
-                        <?php if (!empty($pending_clearances)): ?>
+                        <!-- Recent Clearances List -->
+                        <?php if (!empty($approved_clearances)): ?>
                             <div style="margin-top: 24px;">
                                 <div style="font-size: 0.9rem; font-weight: 600; color: #6b2b5e; margin-bottom: 12px;">
-                                    ⏳ Pending Clearances
+                                    ✅ Recent Clearances
                                 </div>
                                 <div class="pending-list">
-                                    <?php foreach (array_slice($pending_clearances, 0, 5) as $pending): ?>
+                                    <?php foreach (array_slice($approved_clearances, 0, 5) as $clearance): ?>
                                         <div class="pending-item">
                                             <div class="pending-info">
-                                                <div class="pending-name"><?php echo htmlspecialchars($pending['student_name']); ?></div>
+                                                <div class="pending-name"><?php echo htmlspecialchars($clearance['student_name']); ?></div>
                                                 <div class="pending-meta">
-                                                    <span><?php echo $pending['clearance_type']; ?></span>
-                                                    <span><?php echo date('M d', strtotime($pending['request_date'])); ?></span>
+                                                    <span><?php echo $clearance['clearance_type']; ?></span>
+                                                    <span><?php echo date('M d', strtotime($clearance['approved_date'])); ?></span>
                                                 </div>
                                             </div>
-                                            <span class="pending-badge">Pending</span>
+                                            <span class="status-badge status-approved">Approved</span>
                                         </div>
                                     <?php endforeach; ?>
                                 </div>
@@ -1220,7 +1223,7 @@ if (!empty($student_id_search)) {
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
                             <div style="background: #f0e2ea; padding: 16px; border-radius: 16px; text-align: center;">
                                 <div style="font-size: 1.8rem; font-weight: 700; color: #6b2b5e;"><?php echo count($approved_clearances); ?></div>
-                                <div style="font-size: 0.8rem; color: #7a4b6b;">Approved</div>
+                                <div style="font-size: 0.8rem; color: #7a4b6b;">Total Approved</div>
                             </div>
                             <div style="background: #f0e2ea; padding: 16px; border-radius: 16px; text-align: center;">
                                 <div style="font-size: 1.8rem; font-weight: 700; color: #6b2b5e;"><?php echo count($all_certificates); ?></div>
@@ -1265,14 +1268,14 @@ if (!empty($student_id_search)) {
                 <!-- Tabs Section -->
                 <div class="tabs-section">
                     <div class="tabs-header">
-                        <button class="tab-btn active" data-tab="clearance" onclick="showTab('clearance', event)">📋 Create Clearance</button>
+                        <button class="tab-btn active" data-tab="clearance" onclick="showTab('clearance', event)">📋 Issue Clearance</button>
                         <button class="tab-btn" data-tab="certificate" onclick="showTab('certificate', event)">📄 Issue Certificate</button>
                         <button class="tab-btn" data-tab="fitreturn" onclick="showTab('fitreturn', event)">🔄 Fit-to-Return</button>
-                        <button class="tab-btn" data-tab="history" onclick="showTab('history', event)">📚 Clearance History</button>
+                        <button class="tab-btn" data-tab="history" onclick="showTab('history', event)">📚 History</button>
                     </div>
 
                     <div class="tab-content">
-                        <!-- Create Clearance Tab -->
+                        <!-- Issue Clearance Tab (Auto-approved) -->
                         <div class="tab-pane active" id="clearance">
                             <div class="form-card">
                                 <div class="form-card-title">
@@ -1282,7 +1285,7 @@ if (!empty($student_id_search)) {
                                         <line x1="8" y1="2" x2="8" y2="6"/>
                                         <line x1="3" y1="10" x2="21" y2="10"/>
                                     </svg>
-                                    Create Clearance Request
+                                    Issue Clearance (Auto-Approved)
                                 </div>
                                 
                                 <form method="POST" action="">
@@ -1331,7 +1334,15 @@ if (!empty($student_id_search)) {
                                         </div>
                                     </div>
                                     
-                                    <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Create Clearance Request</button>
+                                    <div style="background: #d4edda; padding: 10px; border-radius: 8px; margin: 15px 0; color: #1e7b5c; font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                            <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999"/>
+                                            <path d="M22 4L12 14.01L9 11.01"/>
+                                        </svg>
+                                        <span>Clearance will be automatically approved and ready for printing.</span>
+                                    </div>
+                                    
+                                    <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Issue Clearance & Print</button>
                                 </form>
                             </div>
                         </div>
@@ -1501,24 +1512,25 @@ if (!empty($student_id_search)) {
                             </div>
                         </div>
 
-                        <!-- Clearance History Tab -->
+                        <!-- History Tab -->
                         <div class="tab-pane" id="history">
                             <div class="form-card-title" style="margin-bottom: 20px;">
-                                📚 Clearance & Certificate History for <?php echo htmlspecialchars($student_data['full_name']); ?>
+                                📚 Clearance History for <?php echo htmlspecialchars($student_data['full_name']); ?>
                             </div>
                             
                             <!-- Clearance Requests -->
-                            <h3 style="color: #6b2b5e; margin: 20px 0 10px; font-size: 1rem;">Clearance Requests</h3>
+                            <h3 style="color: #6b2b5e; margin: 20px 0 10px; font-size: 1rem;">Issued Clearances</h3>
                             <div class="table-wrapper">
                                 <table class="data-table">
                                     <thead>
                                         <tr>
                                             <th>Code</th>
                                             <th>Type</th>
-                                            <th>Request Date</th>
+                                            <th>Issue Date</th>
                                             <th>Purpose</th>
                                             <th>Status</th>
                                             <th>Valid Until</th>
+                                            <th>Issued By</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
@@ -1534,7 +1546,7 @@ if (!empty($student_id_search)) {
                                                 <tr>
                                                     <td><span class="clearance-code"><?php echo htmlspecialchars($clearance['clearance_code']); ?></span></td>
                                                     <td><?php echo $clearance['clearance_type']; ?></td>
-                                                    <td><?php echo date('M d, Y', strtotime($clearance['request_date'])); ?></td>
+                                                    <td><?php echo date('M d, Y', strtotime($clearance['approved_date'] ?: $clearance['request_date'])); ?></td>
                                                     <td><?php echo htmlspecialchars(substr($clearance['purpose'], 0, 30)) . '...'; ?></td>
                                                     <td>
                                                         <span class="status-badge status-<?php echo strtolower($clearance['status']); ?>">
@@ -1544,6 +1556,7 @@ if (!empty($student_id_search)) {
                                                     <td>
                                                         <?php echo !empty($clearance['valid_until']) ? date('M d, Y', strtotime($clearance['valid_until'])) : 'No expiry'; ?>
                                                     </td>
+                                                    <td><?php echo htmlspecialchars($clearance['approved_by'] ?: 'N/A'); ?></td>
                                                     <td>
                                                         <div class="action-buttons">
                                                             <a href="generate_clearance.php?id=<?php echo $clearance['id']; ?>" target="_blank" class="pdf-link">
@@ -1562,7 +1575,7 @@ if (!empty($student_id_search)) {
                                             <?php endforeach; ?>
                                         <?php else: ?>
                                             <tr>
-                                                <td colspan="7" class="empty-state">
+                                                <td colspan="8" class="empty-state">
                                                     <p>No clearance requests found</p>
                                                 </td>
                                             </tr>
@@ -1685,18 +1698,17 @@ if (!empty($student_id_search)) {
                 </div>
                 <?php endif; ?>
 
-                <!-- All Pending Clearances (if no student selected) -->
-                <?php if (!$student_data && !empty($pending_clearances)): ?>
+                <!-- All Recent Clearances (if no student selected) -->
+                <?php if (!$student_data && !empty($approved_clearances)): ?>
                 <div class="tabs-section" style="margin-top: 20px;">
                     <div class="tabs-header">
-                        <button class="tab-btn active" onclick="showAllTab('pending', event)">⏳ Pending Clearances</button>
-                        <button class="tab-btn" onclick="showAllTab('approved', event)">✅ Approved</button>
+                        <button class="tab-btn active" onclick="showAllTab('approved', event)">✅ Recent Clearances</button>
                         <button class="tab-btn" onclick="showAllTab('certificates', event)">📄 Recent Certificates</button>
                     </div>
 
                     <div class="tab-content">
-                        <!-- Pending Tab -->
-                        <div class="tab-pane active" id="all-pending">
+                        <!-- Approved Clearances Tab -->
+                        <div class="tab-pane active" id="all-approved">
                             <div class="table-wrapper">
                                 <table class="data-table">
                                     <thead>
@@ -1704,51 +1716,10 @@ if (!empty($student_id_search)) {
                                             <th>Code</th>
                                             <th>Student</th>
                                             <th>Type</th>
-                                            <th>Request Date</th>
+                                            <th>Issue Date</th>
                                             <th>Purpose</th>
-                                            <th>Status</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($pending_clearances as $clearance): ?>
-                                            <tr>
-                                                <td><span class="clearance-code"><?php echo htmlspecialchars($clearance['clearance_code']); ?></span></td>
-                                                <td>
-                                                    <strong><?php echo htmlspecialchars($clearance['student_name']); ?></strong><br>
-                                                    <small><?php echo $clearance['student_id']; ?></small>
-                                                </td>
-                                                <td><?php echo $clearance['clearance_type']; ?></td>
-                                                <td><?php echo date('M d, Y', strtotime($clearance['request_date'])); ?></td>
-                                                <td><?php echo htmlspecialchars(substr($clearance['purpose'], 0, 30)) . '...'; ?></td>
-                                                <td>
-                                                    <span class="status-badge status-pending">Pending</span>
-                                                </td>
-                                                <td>
-                                                    <div class="action-buttons">
-                                                        <button class="btn btn-sm btn-secondary" onclick="openUpdateModal(<?php echo $clearance['id']; ?>, '<?php echo $clearance['clearance_code']; ?>', '<?php echo addslashes($clearance['student_name']); ?>')">Update</button>
-                                                        <a href="generate_clearance.php?id=<?php echo $clearance['id']; ?>" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration: none;">PDF</a>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        <!-- Approved Tab -->
-                        <div class="tab-pane" id="all-approved">
-                            <div class="table-wrapper">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Code</th>
-                                            <th>Student</th>
-                                            <th>Type</th>
-                                            <th>Approved Date</th>
-                                            <th>Approved By</th>
                                             <th>Valid Until</th>
+                                            <th>Issued By</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
@@ -1761,9 +1732,10 @@ if (!empty($student_id_search)) {
                                                     <small><?php echo $clearance['student_id']; ?></small>
                                                 </td>
                                                 <td><?php echo $clearance['clearance_type']; ?></td>
-                                                <td><?php echo date('M d, Y', strtotime($clearance['approved_date'])); ?></td>
-                                                <td><?php echo htmlspecialchars($clearance['approved_by']); ?></td>
+                                                <td><?php echo date('M d, Y', strtotime($clearance['approved_date'] ?: $clearance['request_date'])); ?></td>
+                                                <td><?php echo htmlspecialchars(substr($clearance['purpose'], 0, 30)) . '...'; ?></td>
                                                 <td><?php echo !empty($clearance['valid_until']) ? date('M d, Y', strtotime($clearance['valid_until'])) : 'No expiry'; ?></td>
+                                                <td><?php echo htmlspecialchars($clearance['approved_by'] ?: 'N/A'); ?></td>
                                                 <td>
                                                     <a href="generate_clearance.php?id=<?php echo $clearance['id']; ?>" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration: none;">PDF</a>
                                                 </td>
@@ -1817,47 +1789,6 @@ if (!empty($student_id_search)) {
         </div>
     </div>
 
-    <!-- Update Clearance Modal -->
-    <div id="updateModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 1000;">
-        <div style="background: white; border-radius: 20px; padding: 30px; max-width: 500px; width: 90%;">
-            <h3 style="color: #6b2b5e; margin-bottom: 20px;">Update Clearance Status</h3>
-            <form method="POST" action="">
-                <input type="hidden" name="action" value="update_clearance">
-                <input type="hidden" name="clearance_id" id="modal_clearance_id">
-                
-                <div style="margin-bottom: 15px;">
-                    <strong>Student:</strong> <span id="modal_student_name"></span><br>
-                    <strong>Code:</strong> <span id="modal_clearance_code"></span>
-                </div>
-                
-                <div class="form-group">
-                    <label>Status</label>
-                    <select name="status" class="form-control" required>
-                        <option value="Approved">Approve</option>
-                        <option value="Not Cleared">Not Cleared</option>
-                        <option value="Pending">Keep Pending</option>
-                        <option value="Expired">Mark as Expired</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label>Valid Until (if approved)</label>
-                    <input type="date" name="valid_until" class="form-control">
-                </div>
-                
-                <div class="form-group">
-                    <label>Remarks</label>
-                    <textarea name="remarks" class="form-control" placeholder="Add remarks..."></textarea>
-                </div>
-                
-                <div style="display: flex; gap: 10px; margin-top: 20px;">
-                    <button type="submit" class="btn btn-primary" style="flex: 1;">Update Status</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeUpdateModal()" style="flex: 1;">Cancel</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
     <script>
         // Sidebar toggle
         const sidebar = document.querySelector('.sidebar');
@@ -1874,7 +1805,7 @@ if (!empty($student_id_search)) {
         // Tab functionality
         function showTab(tabName, event) {
             document.querySelectorAll('.tab-pane').forEach(pane => {
-                if (pane.id !== 'all-pending' && pane.id !== 'all-approved' && pane.id !== 'all-certificates') {
+                if (pane.id !== 'all-approved' && pane.id !== 'all-certificates') {
                     pane.classList.remove('active');
                 }
             });
@@ -1887,7 +1818,7 @@ if (!empty($student_id_search)) {
 
         // All tabs functionality
         function showAllTab(tabName, event) {
-            document.querySelectorAll('#all-pending, #all-approved, #all-certificates').forEach(pane => {
+            document.querySelectorAll('#all-approved, #all-certificates').forEach(pane => {
                 pane.classList.remove('active');
             });
             document.querySelectorAll('.tabs-section .tab-btn').forEach(btn => {
@@ -1895,18 +1826,6 @@ if (!empty($student_id_search)) {
             });
             document.getElementById('all-' + tabName).classList.add('active');
             event.target.classList.add('active');
-        }
-
-        // Modal functions
-        function openUpdateModal(id, code, name) {
-            document.getElementById('modal_clearance_id').value = id;
-            document.getElementById('modal_clearance_code').textContent = code;
-            document.getElementById('modal_student_name').textContent = name;
-            document.getElementById('updateModal').style.display = 'flex';
-        }
-
-        function closeUpdateModal() {
-            document.getElementById('updateModal').style.display = 'none';
         }
 
         // Auto-hide alerts

@@ -2,8 +2,6 @@
 require_once('../vendor/setasign/fpdf/fpdf.php');
 require_once '../config/database.php';
 
-
-
 session_start();
 if (!isset($_SESSION['user_id'])) {
     die('Unauthorized');
@@ -64,10 +62,24 @@ $pdf->SetFont('Arial', 'B', 14);
 $pdf->Cell(0, 10, 'CLEARANCE REQUEST', 0, 1);
 $pdf->Ln(5);
 
+// Two-column layout for better organization
 $pdf->SetFont('Arial', '', 12);
 $pdf->Cell(45, 10, 'Clearance No:', 0, 0);
 $pdf->SetFont('Arial', 'B', 12);
-$pdf->Cell(0, 10, $clearance['clearance_code'], 0, 1);
+$pdf->Cell(100, 10, $clearance['clearance_code'], 0, 0);
+
+// Status on the right side
+$pdf->SetFont('Arial', 'B', 10);
+$status_text = 'Status: ' . $clearance['status'];
+$status_color = match($clearance['status']) {
+    'Approved' => [30, 123, 92],
+    'Pending' => [133, 100, 4],
+    'Not Cleared' => [196, 69, 69],
+    default => [108, 117, 125]
+};
+$pdf->SetTextColor($status_color[0], $status_color[1], $status_color[2]);
+$pdf->Cell(0, 10, $status_text, 0, 1, 'R');
+$pdf->SetTextColor(0, 0, 0);
 
 $pdf->SetFont('Arial', '', 12);
 $pdf->Cell(45, 10, 'Student Name:', 0, 0);
@@ -98,21 +110,8 @@ $pdf->MultiCell(0, 8, $clearance['purpose'], 0, 1);
 
 $pdf->Ln(10);
 
-$pdf->SetFont('Arial', 'B', 12);
-$pdf->Cell(0, 10, 'Status: ', 0, 0);
-$status_color = match($clearance['status']) {
-    'Approved' => [30, 123, 92],
-    'Pending' => [133, 100, 4],
-    'Not Cleared' => [196, 69, 69],
-    default => [108, 117, 125]
-};
-$pdf->SetTextColor($status_color[0], $status_color[1], $status_color[2]);
-$pdf->SetFont('Arial', 'B', 14);
-$pdf->Cell(0, 10, $clearance['status'], 0, 1);
-$pdf->SetTextColor(0, 0, 0);
-
+// Approval details
 if (!empty($clearance['approved_date'])) {
-    $pdf->Ln(5);
     $pdf->SetFont('Arial', '', 12);
     $pdf->Cell(45, 10, 'Approved Date:', 0, 0);
     $pdf->SetFont('Arial', 'B', 12);
@@ -141,6 +140,7 @@ if (!empty($clearance['remarks'])) {
 
 $pdf->Ln(20);
 
+// Signature lines
 $pdf->Cell(100, 10, '_________________________', 0, 0);
 $pdf->Cell(90, 10, '_________________________', 0, 1);
 
