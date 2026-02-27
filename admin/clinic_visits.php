@@ -108,112 +108,411 @@ function sendParentNotification($student, $visit_data, $db, $current_user_id, $c
         $mail->Port       = 587;
 
         // Recipients
-        $mail->setFrom('clinic@medflow.com', 'MedFlow Clinic');
+        $mail->setFrom('icare@gmail.com', 'ICARE Clinic');
         $mail->addAddress($student['emergency_email'], $student['emergency_contact'] ?? 'Parent/Guardian');
-        $mail->addReplyTo($staff['email'] ?? 'clinic@medflow.com', $staff['full_name'] ?? 'Clinic Staff');
+        $mail->addReplyTo($staff['email'] ?? 'ICARE@gmail.com', $staff['full_name'] ?? 'Clinic Staff');
 
         // Content
         $mail->isHTML(true);
         $mail->Subject = 'Clinic Visit Notification - ' . $student['full_name'];
         
-        // Build email body
-        $body = "
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                .header { background: #191970; color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; }
-                .content { background: #f5f5f5; padding: 30px; border-radius: 0 0 10px 10px; }
-                .info-box { background: white; padding: 15px; margin: 15px 0; border-left: 4px solid #191970; border-radius: 5px; }
-                .label { font-weight: bold; color: #191970; }
-                .vital-sign { display: inline-block; background: #eceff1; padding: 5px 10px; margin: 2px; border-radius: 15px; font-size: 0.9em; }
-                .footer { margin-top: 30px; font-size: 0.9em; color: #666; text-align: center; }
-            </style>
-        </head>
-        <body>
-            <div class='container'>
-                <div class='header'>
-                    <h2>🏥 MedFlow Clinic - Visit Notification</h2>
-                </div>
-                <div class='content'>
-                    <p>Dear <strong>" . htmlspecialchars($student['emergency_contact'] ?? 'Parent/Guardian') . "</strong>,</p>
-                    
-                    <p>This is to inform you that <strong>" . htmlspecialchars($student['full_name']) . "</strong> visited the school clinic today. Here are the details:</p>
-                    
-                    <div class='info-box'>
-                        <h3 style='margin-top: 0; color: #191970;'>Student Information</h3>
-                        <p><span class='label'>Student ID:</span> " . htmlspecialchars($student['student_id']) . "</p>
-                        <p><span class='label'>Full Name:</span> " . htmlspecialchars($student['full_name']) . "</p>
-                        <p><span class='label'>Grade & Section:</span> Grade " . htmlspecialchars($student['year_level'] ?? 'N/A') . " - " . htmlspecialchars($student['section'] ?? 'N/A') . "</p>
+      // Build email body
+$body = "
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <style>
+        /* Reset styles */
+        body, p, h1, h2, h3, h4, h5, h6 {
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #3c4043;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 18px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.02);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #191970 0%, #1e1e8a 100%);
+            color: white;
+            padding: 28px 24px;
+        }
+        
+        .header h2 {
+            font-size: 24px;
+            font-weight: 500;
+            margin: 0;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .content {
+            padding: 32px 24px;
+            background-color: #ffffff;
+        }
+        
+        .greeting {
+            font-size: 16px;
+            margin-bottom: 24px;
+            color: #5f6368;
+        }
+        
+        .greeting strong {
+            color: #191970;
+        }
+        
+        .info-section {
+            margin-bottom: 28px;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #191970;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e8eaed;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .info-card {
+            background-color: #f8f9fa;
+            border-radius: 14px;
+            padding: 18px 20px;
+            margin-bottom: 16px;
+            border: 1px solid #e8eaed;
+            transition: all 0.2s ease;
+        }
+        
+        .info-card:hover {
+            border-color: #191970;
+            box-shadow: 0 2px 8px rgba(25,25,112,0.08);
+        }
+        
+        .info-row {
+            display: flex;
+            margin-bottom: 12px;
+            align-items: flex-start;
+        }
+        
+        .info-row:last-child {
+            margin-bottom: 0;
+        }
+        
+        .info-label {
+            min-width: 120px;
+            font-weight: 500;
+            color: #5f6368;
+            font-size: 14px;
+        }
+        
+        .info-value {
+            flex: 1;
+            color: #202124;
+            font-weight: 400;
+            font-size: 15px;
+        }
+        
+        .vital-signs-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        
+        .vital-sign {
+            display: inline-flex;
+            align-items: center;
+            background-color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 30px;
+            font-size: 14px;
+            border: 1px solid #e8eaed;
+            color: #3c4043;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        }
+        
+        .vital-sign:hover {
+            border-color: #191970;
+            background-color: #f0f0fa;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 30px;
+            font-size: 13px;
+            font-weight: 500;
+            background-color: #e8f0fe;
+            color: #191970;
+            border: 1px solid #cdd9f0;
+        }
+        
+        .items-used-list {
+            background-color: #ffffff;
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid #e8eaed;
+        }
+        
+        .items-used-list p {
+            margin: 0;
+            color: #202124;
+            line-height: 1.6;
+        }
+        
+        .items-used-list strong {
+            color: #191970;
+        }
+        
+        .note-box {
+            background-color: #fef7e0;
+            border-left: 4px solid #f9ab00;
+            padding: 16px;
+            border-radius: 12px;
+            margin: 16px 0;
+            font-size: 14px;
+            color: #5f6368;
+        }
+        
+        .footer {
+            margin-top: 32px;
+            padding: 24px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #e8eaed;
+            text-align: center;
+            font-size: 13px;
+            color: #5f6368;
+        }
+        
+        .footer p {
+            margin: 4px 0;
+        }
+        
+        .contact-info {
+            margin-top: 12px;
+            font-size: 13px;
+            color: #80868b;
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+        
+        .contact-info span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 14px;
+            border-radius: 30px;
+            font-size: 13px;
+            font-weight: 500;
+            background-color: #e6f4ea;
+            color: #137333;
+            border: 1px solid #ceead6;
+        }
+        
+        .divider {
+            height: 1px;
+            background-color: #e8eaed;
+            margin: 24px 0;
+        }
+        
+        /* Mobile responsive */
+        @media only screen and (max-width: 480px) {
+            .container {
+                border-radius: 0;
+            }
+            
+            .content {
+                padding: 24px 16px;
+            }
+            
+            .info-row {
+                flex-direction: column;
+                gap: 4px;
+            }
+            
+            .info-label {
+                min-width: auto;
+            }
+            
+            .contact-info {
+                flex-direction: column;
+                gap: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <!-- Header -->
+        <div class='header'>
+            <h2>🏥 ICARE Clinic · Visit Notification</h2>
+        </div>
+        
+        <!-- Content -->
+        <div class='content'>
+            <!-- Greeting -->
+            <div class='greeting'>
+                Dear <strong>" . htmlspecialchars($student['emergency_contact'] ?? 'Parent/Guardian') . "</strong>,
+            </div>
+            
+            <p style='margin-bottom: 28px; color: #5f6368;'>This is to inform you that <strong style='color: #191970;'>" . htmlspecialchars($student['full_name']) . "</strong> visited the school clinic today. Here are the details of the visit:</p>
+            
+            <!-- Student Information -->
+            <div class='info-section'>
+                <h3 class='section-title'>
+                    <span>👤</span> Student Information
+                </h3>
+                <div class='info-card'>
+                    <div class='info-row'>
+                        <span class='info-label'>Student ID</span>
+                        <span class='info-value'>" . htmlspecialchars($student['student_id']) . "</span>
                     </div>
-                    
-                    <div class='info-box'>
-                        <h3 style='margin-top: 0; color: #191970;'>Visit Details</h3>
-                        <p><span class='label'>Date & Time:</span> " . date('F d, Y', strtotime($visit_data['visit_date'])) . " at " . date('h:i A', strtotime($visit_data['visit_time'])) . "</p>
-                        <p><span class='label'>Chief Complaint:</span> " . htmlspecialchars($visit_data['complaint']) . "</p>
-                    </div>";
-        
-        // Add vital signs if available
-        if (!empty($visit_data['temperature']) || !empty($visit_data['blood_pressure']) || !empty($visit_data['heart_rate'])) {
-            $body .= "<div class='info-box'>
-                        <h3 style='margin-top: 0; color: #191970;'>Vital Signs</h3>
-                        <div>";
-            if (!empty($visit_data['temperature'])) {
-                $body .= "<span class='vital-sign'>🌡️ Temperature: " . htmlspecialchars($visit_data['temperature']) . "°C</span> ";
-            }
-            if (!empty($visit_data['blood_pressure'])) {
-                $body .= "<span class='vital-sign'>❤️ Blood Pressure: " . htmlspecialchars($visit_data['blood_pressure']) . "</span> ";
-            }
-            if (!empty($visit_data['heart_rate'])) {
-                $body .= "<span class='vital-sign'>💓 Heart Rate: " . htmlspecialchars($visit_data['heart_rate']) . " bpm</span>";
-            }
-            $body .= "    </div>
-                    </div>";
-        }
-        
-        $body .= "<div class='info-box'>
-                        <h3 style='margin-top: 0; color: #191970;'>Assessment & Treatment</h3>
-                        <p><span class='label'>Assessment Notes:</span> " . nl2br(htmlspecialchars($visit_data['notes'] ?? 'None')) . "</p>
-                        <p><span class='label'>Treatment Given:</span> " . nl2br(htmlspecialchars($visit_data['treatment_given'])) . "</p>
-                        <p><span class='label'>Disposition:</span> <strong>" . htmlspecialchars($visit_data['disposition']) . "</strong></p>
-                    </div>";
-        
-        // Add items used if any
-        if (isset($_POST['items_used']) && is_array($_POST['items_used'])) {
-            $items_used_text = [];
-            foreach ($_POST['items_used'] as $index => $item_id) {
-                if (!empty($item_id) && isset($_POST['item_quantity'][$index]) && $_POST['item_quantity'][$index] > 0) {
-                    // Get item details from database
-                    $item_query = "SELECT item_name, category, unit FROM clinic_stock WHERE id = :id";
-                    $item_stmt = $db->prepare($item_query);
-                    $item_stmt->bindParam(':id', $item_id);
-                    $item_stmt->execute();
-                    $item = $item_stmt->fetch(PDO::FETCH_ASSOC);
-                    if ($item) {
-                        $items_used_text[] = $_POST['item_quantity'][$index] . " " . $item['unit'] . " of " . $item['item_name'];
-                    }
-                }
-            }
-            if (!empty($items_used_text)) {
-                $body .= "<div class='info-box'>
-                            <h3 style='margin-top: 0; color: #191970;'>Medicines/Supplies Used</h3>
-                            <p>" . implode(', ', $items_used_text) . "</p>
-                          </div>";
-            }
-        }
-        
-        $body .= "<p>If you have any questions or concerns, please don't hesitate to contact the school clinic.</p>
-                    
-                    <div class='footer'>
-                        <p>This is an automated notification from MedFlow Clinic Management System.<br>
-                        School Clinic Contact: (02) 1234-5678 | clinic@medflow.com</p>
+                    <div class='info-row'>
+                        <span class='info-label'>Full Name</span>
+                        <span class='info-value'><strong>" . htmlspecialchars($student['full_name']) . "</strong></span>
+                    </div>
+                    <div class='info-row'>
+                        <span class='info-label'>Grade & Section</span>
+                        <span class='info-value'>Grade " . htmlspecialchars($student['year_level'] ?? 'N/A') . " - " . htmlspecialchars($student['section'] ?? 'N/A') . "</span>
                     </div>
                 </div>
             </div>
-        </body>
-        </html>";
+            
+            <!-- Visit Details -->
+            <div class='info-section'>
+                <h3 class='section-title'>
+                    <span>📋</span> Visit Details
+                </h3>
+                <div class='info-card'>
+                    <div class='info-row'>
+                        <span class='info-label'>Date & Time</span>
+                        <span class='info-value'>" . date('F d, Y', strtotime($visit_data['visit_date'])) . " at " . date('h:i A', strtotime($visit_data['visit_time'])) . "</span>
+                    </div>
+                    <div class='info-row'>
+                        <span class='info-label'>Chief Complaint</span>
+                        <span class='info-value'>" . htmlspecialchars($visit_data['complaint']) . "</span>
+                    </div>
+                </div>
+            </div>";
+    
+    // Add vital signs if available
+    if (!empty($visit_data['temperature']) || !empty($visit_data['blood_pressure']) || !empty($visit_data['heart_rate'])) {
+        $body .= "<div class='info-section'>
+                    <h3 class='section-title'>
+                        <span>📊</span> Vital Signs
+                    </h3>
+                    <div class='info-card'>
+                        <div class='vital-signs-grid'>";
+        if (!empty($visit_data['temperature'])) {
+            $body .= "<span class='vital-sign'>🌡️ Temperature: <strong>" . htmlspecialchars($visit_data['temperature']) . "°C</strong></span>";
+        }
+        if (!empty($visit_data['blood_pressure'])) {
+            $body .= "<span class='vital-sign'>❤️ Blood Pressure: <strong>" . htmlspecialchars($visit_data['blood_pressure']) . "</strong></span>";
+        }
+        if (!empty($visit_data['heart_rate'])) {
+            $body .= "<span class='vital-sign'>💓 Heart Rate: <strong>" . htmlspecialchars($visit_data['heart_rate']) . " bpm</strong></span>";
+        }
+        $body .= "        </div>
+                    </div>
+                </div>";
+    }
+    
+    $body .= "<div class='info-section'>
+                <h3 class='section-title'>
+                    <span>⚕️</span> Assessment & Treatment
+                </h3>
+                <div class='info-card'>
+                    <div class='info-row'>
+                        <span class='info-label'>Assessment Notes</span>
+                        <span class='info-value'>" . nl2br(htmlspecialchars($visit_data['notes'] ?? 'None')) . "</span>
+                    </div>
+                    <div class='info-row'>
+                        <span class='info-label'>Treatment Given</span>
+                        <span class='info-value'>" . nl2br(htmlspecialchars($visit_data['treatment_given'])) . "</span>
+                    </div>
+                    <div class='info-row'>
+                        <span class='info-label'>Disposition</span>
+                        <span class='info-value'><span class='status-badge'>" . htmlspecialchars($visit_data['disposition']) . "</span></span>
+                    </div>
+                </div>
+            </div>";
+    
+    // Add items used if any
+    if (isset($_POST['items_used']) && is_array($_POST['items_used'])) {
+        $items_used_text = [];
+        foreach ($_POST['items_used'] as $index => $item_id) {
+            if (!empty($item_id) && isset($_POST['item_quantity'][$index]) && $_POST['item_quantity'][$index] > 0) {
+                // Get item details from database
+                $item_query = "SELECT item_name, category, unit FROM clinic_stock WHERE id = :id";
+                $item_stmt = $db->prepare($item_query);
+                $item_stmt->bindParam(':id', $item_id);
+                $item_stmt->execute();
+                $item = $item_stmt->fetch(PDO::FETCH_ASSOC);
+                if ($item) {
+                    $items_used_text[] = "<span class='badge'>" . $_POST['item_quantity'][$index] . " " . $item['unit'] . " of " . $item['item_name'] . "</span>";
+                }
+            }
+        }
+        if (!empty($items_used_text)) {
+            $body .= "<div class='info-section'>
+                        <h3 class='section-title'>
+                            <span>💊</span> Medicines & Supplies Used
+                        </h3>
+                        <div class='items-used-list'>
+                            <p style='margin-bottom: 12px;'><strong style='color: #191970;'>Items administered:</strong></p>
+                            <div style='display: flex; flex-wrap: wrap; gap: 8px;'>
+                                " . implode(' ', $items_used_text) . "
+                            </div>
+                        </div>
+                    </div>";
+        }
+    }
+    
+    $body .= "<div class='note-box'>
+                <span style='font-weight: 500; color: #f9ab00;'>ℹ️ Note:</span> If you have any questions or concerns about this visit, please don't hesitate to contact the school clinic.
+            </div>
+            
+            <!-- Footer -->
+            <div class='footer'>
+                <p style='margin-bottom: 8px;'>This is an automated notification from <strong>MedFlow Clinic Management System</strong></p>
+                <div class='contact-info'>
+                    <span>📞 (02) 1234-5678</span>
+                    <span>✉️ clinic@medflow.com</span>
+                    <span>🏥 ICARE School Clinic</span>
+                </div>
+                <p style='margin-top: 16px; font-size: 11px; color: #9aa0a6;'>© " . date('Y') . " MedFlow. All rights reserved.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>";
         
         $mail->Body = $body;
         $mail->AltBody = strip_tags(str_replace(['<br>', '</p>'], ["\n", "\n\n"], $body));
