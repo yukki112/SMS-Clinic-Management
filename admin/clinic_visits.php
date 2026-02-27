@@ -22,10 +22,29 @@ $student_id_search = isset($_GET['student_id']) ? $_GET['student_id'] : '';
 $success_message = '';
 $error_message = '';
 
+// Get clinic stock for dropdown
+function getClinicStock($db) {
+    try {
+        $query = "SELECT * FROM clinic_stock 
+                  WHERE quantity > 0 
+                  ORDER BY category, item_name ASC";
+        $stmt = $db->query($query);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        return [];
+    }
+}
+
+$clinic_stock = getClinicStock($db);
+
 // Handle form submission for new visit
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] == 'save_visit') {
         try {
+            // Start transaction
+            $db->beginTransaction();
+            
+            // Insert visit history
             $query = "INSERT INTO visit_history (
                 student_id, visit_date, visit_time, complaint, 
                 temperature, blood_pressure, heart_rate, 
@@ -54,39 +73,93 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $stmt->bindParam(':attended_by', $current_user_id);
             $stmt->bindParam(':notes', $_POST['notes']);
             
-            if ($stmt->execute()) {
-                $success_message = "Clinic visit logged successfully!";
-                
-                // Refresh student data to show new visit
-                $student_id_search = $_POST['student_id'];
-                
-                // Fetch updated student data
-                $api_url = "https://ttm.qcprotektado.com/api/students.php";
-                $ch = curl_init();
-                curl_setopt($ch, CURLOPT_URL, $api_url);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                $response = curl_exec($ch);
-                $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                
-                if ($http_code == 200 && $response) {
-                    $api_response = json_decode($response, true);
-                    if (isset($api_response['records']) && is_array($api_response['records'])) {
-                        foreach ($api_response['records'] as $student) {
-                            if (isset($student['student_id']) && $student['student_id'] == $_POST['student_id']) {
-                                $student_data = $student;
-                                $student_data['clinic_visits'] = getClinicVisits($db, $_POST['student_id']);
-                                break;
-                            }
+            $stmt->execute();
+            $visit_id = $db->lastInsertId();
+            
+            // Process medicines/supplies used
+            if (isset($_POST['items_used']) && is_array($_POST['items_used'])) {
+                foreach ($_POST['items_used'] as $index => $item_id) {
+                    if (!empty($item_id) && isset($_POST['item_quantity'][$index]) && $_POST['item_quantity'][$index] > 0) {
+                        $item_quantity = intval($_POST['item_quantity'][$index]);
+                        
+                        // Get item details
+                        $item_query = "SELECT * FROM clinic_stock WHERE id = :id";
+                        $item_stmt = $db->prepare($item_query);
+                        $item_stmt->bindParam(':id', $item_id);
+                        $item_stmt->execute();
+                        $item = $item_stmt->fetch(PDO::FETCH_ASSOC);
+                        
+                        if ($item && $item['quantity'] >= $item_quantity) {
+                            // Update stock
+                            $update_query = "UPDATE clinic_stock 
+                                           SET quantity = quantity - :quantity 
+                                           WHERE id = :id";
+                            $update_stmt = $db->prepare($update_query);
+                            $update_stmt->bindParam(':quantity', $item_quantity);
+                            $update_stmt->bindParam(':id', $item_id);
+                            $update_stmt->execute();
+                            
+                            // Insert dispensing log
+                            $log_query = "INSERT INTO dispensing_log (
+                                visit_id, student_id, student_name, item_code,
+                                item_name, category, quantity, unit, dispensed_by, reason
+                            ) VALUES (
+                                :visit_id, :student_id, :student_name, :item_code,
+                                :item_name, :category, :quantity, :unit, :dispensed_by, :reason
+                            )";
+                            
+                            $log_stmt = $db->prepare($log_query);
+                            $log_stmt->bindParam(':visit_id', $visit_id);
+                            $log_stmt->bindParam(':student_id', $_POST['student_id']);
+                            $log_stmt->bindParam(':student_name', $_POST['student_name']);
+                            $log_stmt->bindParam(':item_code', $item['item_code']);
+                            $log_stmt->bindParam(':item_name', $item['item_name']);
+                            $log_stmt->bindParam(':category', $item['category']);
+                            $log_stmt->bindParam(':quantity', $item_quantity);
+                            $log_stmt->bindParam(':unit', $item['unit']);
+                            $log_stmt->bindParam(':dispensed_by', $current_user_id);
+                            $log_stmt->bindParam(':reason', $_POST['complaint']);
+                            $log_stmt->execute();
                         }
                     }
                 }
-            } else {
-                $error_message = "Error saving visit. Please try again.";
             }
-        } catch (PDOException $e) {
-            $error_message = "Database error: " . $e->getMessage();
+            
+            $db->commit();
+            $success_message = "Clinic visit logged successfully!";
+            
+            // Refresh student data to show new visit
+            $student_id_search = $_POST['student_id'];
+            
+            // Fetch updated student data
+            $api_url = "https://ttm.qcprotektado.com/api/students.php";
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $api_url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            $response = curl_exec($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            
+            if ($http_code == 200 && $response) {
+                $api_response = json_decode($response, true);
+                if (isset($api_response['records']) && is_array($api_response['records'])) {
+                    foreach ($api_response['records'] as $student) {
+                        if (isset($student['student_id']) && $student['student_id'] == $_POST['student_id']) {
+                            $student_data = $student;
+                            $student_data['clinic_visits'] = getClinicVisits($db, $_POST['student_id']);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Refresh clinic stock
+            $clinic_stock = getClinicStock($db);
+            
+        } catch (Exception $e) {
+            $db->rollBack();
+            $error_message = "Error: " . $e->getMessage();
         }
     }
 }
@@ -127,23 +200,33 @@ try {
     $stmt = $db->query($query);
     $stats['recent_visits'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
+    // Low stock count
+    $query = "SELECT COUNT(*) as total FROM clinic_stock WHERE quantity <= minimum_stock";
+    $stmt = $db->query($query);
+    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stats['low_stock'] = $result ? $result['total'] : 0;
+    
 } catch (PDOException $e) {
     error_log("Error fetching stats: " . $e->getMessage());
     $stats = [
         'today_visits' => 0,
         'week_visits' => 0,
         'common_complaints' => [],
-        'recent_visits' => []
+        'recent_visits' => [],
+        'low_stock' => 0
     ];
 }
 
 // Function to get clinic visits for a student
 function getClinicVisits($db, $student_id) {
     try {
-        $query = "SELECT v.*, u.full_name as attended_by_name 
+        $query = "SELECT v.*, u.full_name as attended_by_name,
+                         GROUP_CONCAT(CONCAT(d.quantity, ' ', d.unit, ' of ', d.item_name) SEPARATOR ', ') as items_used
                   FROM visit_history v
                   LEFT JOIN users u ON v.attended_by = u.id
+                  LEFT JOIN dispensing_log d ON v.id = d.visit_id
                   WHERE v.student_id = :student_id 
+                  GROUP BY v.id
                   ORDER BY v.visit_date DESC, v.visit_time DESC";
         $stmt = $db->prepare($query);
         $stmt->bindParam(':student_id', $student_id);
@@ -263,7 +346,7 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
         /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 24px;
             margin-bottom: 30px;
             animation: fadeInUp 0.6s ease;
@@ -316,6 +399,13 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
             font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+
+        .stock-warning {
+            color: #c62828;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin-top: 4px;
         }
 
         /* Alert Messages */
@@ -471,6 +561,20 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
             background: #cfd8dc;
         }
 
+        .btn-danger {
+            background: #c62828;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #b71c1c;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+
         /* Quick Stats Card */
         .quick-stats-card {
             background: white;
@@ -580,6 +684,90 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
         .vital-input input {
             text-align: center;
             font-size: 1.1rem;
+        }
+
+        /* Items Used Section */
+        .items-section {
+            background: #f5f5f5;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 1px solid #cfd8dc;
+        }
+
+        .items-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+
+        .items-header h3 {
+            font-size: 1rem;
+            color: #191970;
+            font-weight: 600;
+        }
+
+        .item-row {
+            display: grid;
+            grid-template-columns: 3fr 1fr 1fr auto;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #cfd8dc;
+        }
+
+        .item-select {
+            width: 100%;
+        }
+
+        .item-quantity {
+            width: 100%;
+        }
+
+        .item-stock {
+            font-size: 0.7rem;
+            color: #78909c;
+        }
+
+        .remove-item {
+            background: #ffebee;
+            color: #c62828;
+            border: none;
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        .remove-item:hover {
+            background: #c62828;
+            color: white;
+        }
+
+        .add-item-btn {
+            background: none;
+            border: 2px dashed #191970;
+            color: #191970;
+            padding: 10px;
+            border-radius: 8px;
+            width: 100%;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+        .add-item-btn:hover {
+            background: rgba(25, 25, 112, 0.1);
         }
 
         .disposition-grid {
@@ -724,6 +912,15 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
             color: #1565c0;
         }
 
+        .items-used-badge {
+            background: #e8eaf6;
+            color: #191970;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            display: inline-block;
+        }
+
         .empty-state {
             text-align: center;
             padding: 50px 20px;
@@ -790,6 +987,10 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                 flex-direction: column;
                 text-align: center;
             }
+            
+            .item-row {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -803,7 +1004,7 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
             <div class="dashboard-container">
                 <div class="welcome-section">
                     <h1>Clinic Visits & Consultation</h1>
-                    <p>Log and manage student clinic visits.</p>
+                    <p>Log and manage student clinic visits with medicine tracking.</p>
                 </div>
 
                 <!-- Alert Messages -->
@@ -869,6 +1070,23 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                             <p>Recent Visits</p>
                         </div>
                     </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <circle cx="12" cy="12" r="10"/>
+                                <line x1="12" y1="8" x2="12" y2="12"/>
+                                <line x1="12" y1="16" x2="12.01" y2="16"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['low_stock']; ?></h3>
+                            <p>Low Stock Items</p>
+                            <?php if ($stats['low_stock'] > 0): ?>
+                                <div class="stock-warning">⚠️ Needs attention</div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Main Grid -->
@@ -885,7 +1103,7 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                         
                         <form method="GET" action="" class="search-form">
                             <div class="form-group">
-                                <label for="student_id">Student ID</label>
+                                <label for="student_id">Student ID / LRN</label>
                                 <input type="text" class="form-control" id="student_id" name="student_id" 
                                        placeholder="Enter student ID" 
                                        value="<?php echo htmlspecialchars($student_id_search); ?>" required>
@@ -986,9 +1204,10 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                         </div>
                     </div>
 
-                    <form method="POST" action="">
+                    <form method="POST" action="" id="visitForm">
                         <input type="hidden" name="action" value="save_visit">
                         <input type="hidden" name="student_id" value="<?php echo htmlspecialchars($student_data['student_id']); ?>">
+                        <input type="hidden" name="student_name" value="<?php echo htmlspecialchars($student_data['full_name']); ?>">
 
                         <div class="form-row">
                             <div class="form-group">
@@ -1045,6 +1264,22 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                             <textarea name="notes" class="form-control" placeholder="e.g., Possible viral fever, Mild dehydration, Minor sprain..."></textarea>
                         </div>
 
+                        <!-- Items Used Section (NEW) -->
+                        <div class="items-section">
+                            <div class="items-header">
+                                <h3>💊 Medicines / Supplies Used</h3>
+                                <span style="font-size: 0.8rem; color: #78909c;">Items will be deducted from inventory</span>
+                            </div>
+                            
+                            <div id="items-container">
+                                <!-- Item rows will be added here dynamically -->
+                            </div>
+                            
+                            <button type="button" class="add-item-btn" onclick="addItemRow()">
+                                + Add Medicine or Supply
+                            </button>
+                        </div>
+
                         <div class="form-group">
                             <label>Treatment Given</label>
                             <textarea name="treatment_given" class="form-control" placeholder="e.g., Paracetamol 500mg given, ORS given, Wound cleaned & dressed, Rested for 30 minutes..." required></textarea>
@@ -1072,7 +1307,7 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                             </div>
                         </div>
 
-                        <button type="submit" class="btn btn-primary" style="margin-top: 10px;">
+                        <button type="submit" class="btn btn-primary" style="margin-top: 10px;" onclick="return validateItems()">
                             Save Clinic Visit
                         </button>
                     </form>
@@ -1093,6 +1328,7 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                                         <th>Date & Time</th>
                                         <th>Complaint</th>
                                         <th>Vital Signs</th>
+                                        <th>Items Used</th>
                                         <th>Treatment</th>
                                         <th>Disposition</th>
                                         <th>Attended By</th>
@@ -1117,6 +1353,13 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                                                 <?php endif; ?>
                                                 <?php if (!empty($visit['heart_rate'])): ?>
                                                     <span class="vital-badge">💓 <?php echo $visit['heart_rate']; ?> bpm</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <?php if (!empty($visit['items_used'])): ?>
+                                                    <span class="items-used-badge"><?php echo htmlspecialchars($visit['items_used']); ?></span>
+                                                <?php else: ?>
+                                                    <small style="color: #78909c;">None</small>
                                                 <?php endif; ?>
                                             </td>
                                             <td>
@@ -1204,7 +1447,29 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
         </div>
     </div>
 
+    <!-- Template for item row -->
+    <template id="item-row-template">
+        <div class="item-row">
+            <select name="items_used[]" class="form-control item-select" onchange="updateStockInfo(this)" required>
+                <option value="">Select item</option>
+                <?php foreach ($clinic_stock as $item): ?>
+                    <option value="<?php echo $item['id']; ?>" 
+                            data-stock="<?php echo $item['quantity']; ?>"
+                            data-unit="<?php echo $item['unit']; ?>">
+                        <?php echo htmlspecialchars($item['item_name']); ?> (<?php echo $item['category']; ?>) - Stock: <?php echo $item['quantity']; ?> <?php echo $item['unit']; ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <input type="number" name="item_quantity[]" class="form-control item-quantity" 
+                   placeholder="Qty" min="1" step="1" required onchange="validateQuantity(this)">
+            <div class="item-stock" id="stock-info"></div>
+            <button type="button" class="remove-item" onclick="removeItemRow(this)">✕</button>
+        </div>
+    </template>
+
     <script>
+        let itemCount = 0;
+
         // Sidebar toggle sync
         const sidebar = document.querySelector('.sidebar');
         const mainContent = document.getElementById('mainContent');
@@ -1215,6 +1480,89 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
                 sidebar.classList.toggle('collapsed');
                 mainContent.classList.toggle('expanded');
             });
+        }
+
+        // Add new item row
+        function addItemRow() {
+            const container = document.getElementById('items-container');
+            const template = document.getElementById('item-row-template');
+            const clone = template.content.cloneNode(true);
+            
+            // Add unique identifier
+            const row = clone.querySelector('.item-row');
+            row.dataset.index = itemCount;
+            itemCount++;
+            
+            container.appendChild(clone);
+        }
+
+        // Remove item row
+        function removeItemRow(button) {
+            const row = button.closest('.item-row');
+            row.remove();
+        }
+
+        // Update stock information when item is selected
+        function updateStockInfo(select) {
+            const row = select.closest('.item-row');
+            const stockInfo = row.querySelector('.item-stock');
+            const selectedOption = select.options[select.selectedIndex];
+            
+            if (selectedOption.value) {
+                const stock = selectedOption.dataset.stock;
+                const unit = selectedOption.dataset.unit;
+                stockInfo.textContent = `Available: ${stock} ${unit}`;
+                
+                // Update max attribute for quantity input
+                const quantityInput = row.querySelector('.item-quantity');
+                quantityInput.max = stock;
+            } else {
+                stockInfo.textContent = '';
+            }
+        }
+
+        // Validate quantity against available stock
+        function validateQuantity(input) {
+            const row = input.closest('.item-row');
+            const select = row.querySelector('.item-select');
+            const selectedOption = select.options[select.selectedIndex];
+            
+            if (selectedOption.value) {
+                const maxStock = parseInt(selectedOption.dataset.stock);
+                const quantity = parseInt(input.value);
+                
+                if (quantity > maxStock) {
+                    alert(`Quantity exceeds available stock (${maxStock} ${selectedOption.dataset.unit})`);
+                    input.value = '';
+                }
+            }
+        }
+
+        // Validate form before submission
+        function validateItems() {
+            const itemRows = document.querySelectorAll('.item-row');
+            let hasErrors = false;
+            
+            itemRows.forEach(row => {
+                const select = row.querySelector('.item-select');
+                const quantity = row.querySelector('.item-quantity');
+                
+                if (select.value && (!quantity.value || quantity.value < 1)) {
+                    alert('Please enter quantity for selected items');
+                    hasErrors = true;
+                }
+                
+                if (select.value && quantity.value) {
+                    const selectedOption = select.options[select.selectedIndex];
+                    const maxStock = parseInt(selectedOption.dataset.stock);
+                    if (parseInt(quantity.value) > maxStock) {
+                        alert(`Insufficient stock for ${selectedOption.textContent}`);
+                        hasErrors = true;
+                    }
+                }
+            });
+            
+            return !hasErrors;
         }
 
         // Auto-hide alerts after 5 seconds
@@ -1231,6 +1579,11 @@ if (!empty($student_id_search) && !isset($_POST['action'])) {
         if (pageTitle) {
             pageTitle.textContent = 'Clinic Visits';
         }
+
+        // Add first item row by default
+        document.addEventListener('DOMContentLoaded', function() {
+            addItemRow();
+        });
     </script>
 </body>
-</html> 
+</html>
