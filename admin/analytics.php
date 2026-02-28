@@ -22,7 +22,7 @@ $current_user = $stmt->fetch(PDO::FETCH_ASSOC);
 // ============================================
 $stats = [];
 
-// Total patients/students
+// Total unique students across all tables
 $query = "SELECT COUNT(DISTINCT student_id) as total FROM (
     SELECT student_id FROM clearance_requests
     UNION
@@ -31,6 +31,8 @@ $query = "SELECT COUNT(DISTINCT student_id) as total FROM (
     SELECT student_id FROM visit_history
     UNION
     SELECT student_id FROM physical_exam_records
+    UNION
+    SELECT student_id FROM medical_certificates
 ) as all_students";
 $stmt = $db->query($query);
 $stats['total_students'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'] ?: 0;
@@ -38,27 +40,32 @@ $stats['total_students'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'] ?: 0;
 // Today's visits
 $query = "SELECT COUNT(*) as total FROM visit_history WHERE visit_date = CURDATE()";
 $stmt = $db->query($query);
-$stats['today_visits'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$stats['today_visits'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'] ?: 0;
 
 // Active clearances
 $query = "SELECT COUNT(*) as total FROM clearance_requests WHERE status = 'Approved' AND (valid_until IS NULL OR valid_until >= CURDATE())";
 $stmt = $db->query($query);
-$stats['active_clearances'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$stats['active_clearances'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'] ?: 0;
 
 // Pending requests
 $query = "SELECT COUNT(*) as total FROM clearance_requests WHERE status = 'Pending'";
 $stmt = $db->query($query);
-$stats['pending_requests'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$stats['pending_requests'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'] ?: 0;
 
 // Total incidents this month
 $query = "SELECT COUNT(*) as total FROM incidents WHERE MONTH(incident_date) = MONTH(CURDATE()) AND YEAR(incident_date) = YEAR(CURDATE())";
 $stmt = $db->query($query);
-$stats['monthly_incidents'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$stats['monthly_incidents'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'] ?: 0;
 
 // Stock items low in inventory
 $query = "SELECT COUNT(*) as total FROM clinic_stock WHERE quantity <= minimum_stock";
 $stmt = $db->query($query);
-$stats['low_stock_items'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$stats['low_stock_items'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'] ?: 0;
+
+// Total staff
+$query = "SELECT COUNT(*) as total FROM users";
+$stmt = $db->query($query);
+$stats['total_staff'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'] ?: 0;
 
 // ============================================
 // AI ANALYTICS - TRENDS & PREDICTIONS
@@ -81,11 +88,15 @@ $days_map = [1 => 'Sun', 2 => 'Mon', 3 => 'Tue', 4 => 'Wed', 5 => 'Thu', 6 => 'F
 $forecast = [];
 for ($i = 0; $i < 7; $i++) {
     $date = date('Y-m-d', strtotime("+$i days"));
-    $day_of_week = date('N', strtotime($date)) + 1; // MySQL day of week (1=Sun)
+    $day_of_week = date('N', strtotime($date)) + 1; // MySQL day of week (1=Sun, 7=Sat)
+    // Adjust for MySQL day of week (1=Sunday)
+    if ($day_of_week == 8) $day_of_week = 1;
+    
+    $predicted = isset($visit_patterns[$day_of_week]) ? round($visit_patterns[$day_of_week] * (0.9 + (rand(0, 20)/100))) : rand(2, 6);
     $forecast[] = [
         'date' => $date,
         'day' => $days_map[$day_of_week],
-        'predicted' => isset($visit_patterns[$day_of_week]) ? round($visit_patterns[$day_of_week] * (0.9 + (rand(0, 20)/100))) : rand(3, 8)
+        'predicted' => $predicted
     ];
 }
 
@@ -121,6 +132,7 @@ $query = "SELECT
             cs.category,
             cs.quantity,
             cs.minimum_stock,
+            cs.unit,
             cs.expiry_date,
             DATEDIFF(cs.expiry_date, CURDATE()) as days_until_expiry,
             (SELECT SUM(quantity) FROM dispensing_log WHERE item_code = cs.item_code AND dispensed_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) as monthly_usage
@@ -137,7 +149,7 @@ $query = "SELECT
 $stmt = $db->query($query);
 $expiry_alerts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// 5. STUDENT HEALTH TRENDS
+// 5. MONTHLY HEALTH TRENDS
 $query = "SELECT 
             MONTH(visit_date) as month,
             COUNT(*) as visit_count,
@@ -149,7 +161,17 @@ $query = "SELECT
 $stmt = $db->query($query);
 $monthly_health_trends = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// 6. AI INSIGHTS - Generate intelligent recommendations
+// 6. INCIDENT TYPES BREAKDOWN
+$query = "SELECT 
+            incident_type,
+            COUNT(*) as count
+          FROM incidents
+          WHERE incident_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+          GROUP BY incident_type";
+$stmt = $db->query($query);
+$incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// 7. AI INSIGHTS - Generate intelligent recommendations
 $insights = [];
 
 // Stock insight
@@ -160,7 +182,7 @@ if ($stats['low_stock_items'] > 0) {
         'title' => 'Low Stock Alert',
         'message' => "You have {$stats['low_stock_items']} items below minimum stock level. Consider restocking soon.",
         'action' => 'View Inventory',
-        'link' => 'inventory.php'
+        'link' => 'clinic_stock.php'
     ];
 }
 
@@ -175,7 +197,7 @@ if (count($expiring_soon) > 0) {
         'title' => 'Expiring Soon',
         'message' => count($expiring_soon) . " items will expire within 30 days. Plan usage or disposal.",
         'action' => 'Check Expiry',
-        'link' => 'inventory.php?filter=expiring'
+        'link' => 'clinic_stock.php?filter=expiring'
     ];
 }
 
@@ -200,7 +222,7 @@ if ($peak_day) {
 }
 
 // Incident pattern insight
-if (!empty($high_risk_locations) && $high_risk_locations[0]['incident_count'] > 2) {
+if (!empty($high_risk_locations) && isset($high_risk_locations[0]['incident_count']) && $high_risk_locations[0]['incident_count'] > 2) {
     $insights[] = [
         'type' => 'warning',
         'icon' => '🚨',
@@ -212,7 +234,7 @@ if (!empty($high_risk_locations) && $high_risk_locations[0]['incident_count'] > 
 }
 
 // Clearance demand insight
-if (!empty($clearance_demand) && $clearance_demand[0]['request_count'] > 5) {
+if (!empty($clearance_demand) && isset($clearance_demand[0]['request_count']) && $clearance_demand[0]['request_count'] > 5) {
     $insights[] = [
         'type' => 'success',
         'icon' => '✅',
@@ -223,7 +245,19 @@ if (!empty($clearance_demand) && $clearance_demand[0]['request_count'] > 5) {
     ];
 }
 
-// 7. WEEKLY ACTIVITY DATA (for chart)
+// Pending requests insight
+if ($stats['pending_requests'] > 5) {
+    $insights[] = [
+        'type' => 'warning',
+        'icon' => '⏳',
+        'title' => 'Pending Clearances',
+        'message' => "You have {$stats['pending_requests']} pending clearance requests that need attention.",
+        'action' => 'Review Now',
+        'link' => 'clearance_requests.php?status=Pending'
+    ];
+}
+
+// 8. WEEKLY ACTIVITY DATA (for chart)
 $query = "SELECT 
             DAYNAME(visit_date) as day,
             COUNT(*) as count
@@ -261,13 +295,13 @@ foreach ($all_days as $day) {
 $counts = $filled_counts;
 $days = $all_days;
 
-// 8. RECENT ACTIVITIES
+// 9. RECENT ACTIVITIES - FIXED: Using correct column names from your database
 $recent_activities = [];
 
-// Recent visits
+// Recent visits - Using correct columns from visit_history
 $query = "SELECT 
             'visit' as type,
-            v.student_name,
+            v.student_id,
             v.visit_date,
             v.visit_time,
             v.complaint,
@@ -279,16 +313,37 @@ $query = "SELECT
 $stmt = $db->query($query);
 $recent_visits = $stmt->fetchAll(PDO::FETCH_ASSOC);
 foreach ($recent_visits as $visit) {
+    // Get student name from other tables since visit_history doesn't have student_name
+    $student_name = 'Student #' . $visit['student_id'];
+    
+    // Try to get name from physical_exam_records
+    $name_query = "SELECT student_name FROM physical_exam_records WHERE student_id = ? LIMIT 1";
+    $name_stmt = $db->prepare($name_query);
+    $name_stmt->execute([$visit['student_id']]);
+    $name_result = $name_stmt->fetch(PDO::FETCH_ASSOC);
+    if ($name_result) {
+        $student_name = $name_result['student_name'];
+    } else {
+        // Try clearance_requests
+        $name_query = "SELECT student_name FROM clearance_requests WHERE student_id = ? LIMIT 1";
+        $name_stmt = $db->prepare($name_query);
+        $name_stmt->execute([$visit['student_id']]);
+        $name_result = $name_stmt->fetch(PDO::FETCH_ASSOC);
+        if ($name_result) {
+            $student_name = $name_result['student_name'];
+        }
+    }
+    
     $recent_activities[] = [
         'type' => 'visit',
         'title' => 'Student Visit',
-        'description' => $visit['student_name'] . ' - ' . $visit['complaint'],
+        'description' => $student_name . ' - ' . $visit['complaint'],
         'time' => date('M d, h:i A', strtotime($visit['visit_date'] . ' ' . $visit['visit_time'])),
         'by' => $visit['attended_by'] ?? 'Unknown'
     ];
 }
 
-// Recent incidents
+// Recent incidents - incidents table has student_name
 $query = "SELECT 
             'incident' as type,
             student_name,
@@ -311,7 +366,7 @@ foreach ($recent_incidents as $incident) {
     ];
 }
 
-// Recent clearances
+// Recent clearances - clearance_requests has student_name
 $query = "SELECT 
             'clearance' as type,
             student_name,
@@ -333,13 +388,37 @@ foreach ($recent_clearances as $clearance) {
     ];
 }
 
+// Recent dispensing logs
+$query = "SELECT 
+            'dispensing' as type,
+            d.student_name,
+            d.item_name,
+            d.quantity,
+            d.dispensed_date,
+            u.full_name as dispensed_by
+          FROM dispensing_log d
+          LEFT JOIN users u ON d.dispensed_by = u.id
+          ORDER BY d.dispensed_date DESC
+          LIMIT 2";
+$stmt = $db->query($query);
+$recent_dispensing = $stmt->fetchAll(PDO::FETCH_ASSOC);
+foreach ($recent_dispensing as $dispense) {
+    $recent_activities[] = [
+        'type' => 'dispensing',
+        'title' => 'Medicine Dispensed',
+        'description' => $dispense['student_name'] . ' - ' . $dispense['item_name'] . ' (' . $dispense['quantity'] . ')',
+        'time' => date('M d, h:i A', strtotime($dispense['dispensed_date'])),
+        'by' => $dispense['dispensed_by'] ?? 'Unknown'
+    ];
+}
+
 // Sort by time (most recent first)
 usort($recent_activities, function($a, $b) {
     return strtotime($b['time']) - strtotime($a['time']);
 });
-$recent_activities = array_slice($recent_activities, 0, 5);
+$recent_activities = array_slice($recent_activities, 0, 6);
 
-// 9. CLEARANCE REQUESTS SUMMARY
+// 10. CLEARANCE REQUESTS SUMMARY
 $query = "SELECT 
             status,
             COUNT(*) as count
@@ -351,15 +430,18 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
     $clearance_status[$row['status']] = $row['count'];
 }
 
-// 10. INCIDENT TYPES BREAKDOWN
-$query = "SELECT 
-            incident_type,
-            COUNT(*) as count
-          FROM incidents
-          WHERE incident_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-          GROUP BY incident_type";
+// 11. UPCOMING APPOINTMENTS (if appointments table exists)
+$upcoming_appointments = [];
+$query = "SELECT COUNT(*) as table_exists FROM information_schema.tables WHERE table_name = 'appointments' AND table_schema = 'cms_clinic'";
 $stmt = $db->query($query);
-$incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$table_exists = $stmt->fetch(PDO::FETCH_ASSOC);
+if ($table_exists['table_exists'] > 0) {
+    $query = "SELECT COUNT(*) as total FROM appointments WHERE appointment_date >= CURDATE() AND status = 'scheduled'";
+    $stmt = $db->query($query);
+    $stats['upcoming_appointments'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'] ?: 0;
+} else {
+    $stats['upcoming_appointments'] = 0;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -422,7 +504,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .header-left h1 {
             font-size: 2.2rem;
             font-weight: 700;
-            color: #0a2463;
+            color: #191970;
             margin-bottom: 8px;
             letter-spacing: -0.5px;
         }
@@ -445,7 +527,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
         .date-badge i {
-            color: #0a2463;
+            color: #191970;
             font-size: 1.2rem;
         }
 
@@ -456,7 +538,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         /* AI Insights Banner */
         .ai-insights-banner {
-            background: linear-gradient(135deg, #0a2463 0%, #1e3a8a 100%);
+            background: linear-gradient(135deg, #191970 0%, #2a2a9e 100%);
             border-radius: 20px;
             padding: 24px 30px;
             margin-bottom: 30px;
@@ -464,7 +546,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             align-items: center;
             justify-content: space-between;
             color: white;
-            box-shadow: 0 10px 25px -5px rgba(10, 36, 99, 0.3);
+            box-shadow: 0 10px 25px -5px rgba(25, 25, 112, 0.3);
             animation: fadeInUp 0.6s ease;
         }
 
@@ -512,7 +594,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 24px;
             margin-bottom: 30px;
             animation: fadeInUp 0.7s ease;
@@ -532,14 +614,14 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         .stat-card:hover {
             transform: translateY(-4px);
-            box-shadow: 0 12px 24px rgba(10, 36, 99, 0.08);
-            border-color: #0a2463;
+            box-shadow: 0 12px 24px rgba(25, 25, 112, 0.08);
+            border-color: #191970;
         }
 
         .stat-icon {
             width: 64px;
             height: 64px;
-            background: linear-gradient(135deg, #0a2463 0%, #1e3a8a 100%);
+            background: linear-gradient(135deg, #191970 0%, #2a2a9e 100%);
             border-radius: 16px;
             display: flex;
             align-items: center;
@@ -555,7 +637,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .stat-info h3 {
             font-size: 2.2rem;
             font-weight: 700;
-            color: #0a2463;
+            color: #191970;
             margin-bottom: 4px;
             line-height: 1.2;
         }
@@ -594,7 +676,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         .trend-neutral {
             background: #e6f0fa;
-            color: #0a2463;
+            color: #191970;
             padding: 4px 10px;
             border-radius: 30px;
             font-weight: 600;
@@ -626,7 +708,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             left: 0;
             width: 4px;
             height: 100%;
-            background: #0a2463;
+            background: #191970;
         }
 
         .insight-card.warning::before {
@@ -661,7 +743,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             align-items: center;
             justify-content: center;
             font-size: 20px;
-            color: #0a2463;
+            color: #191970;
         }
 
         .insight-title {
@@ -682,7 +764,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             padding: 8px 16px;
             background: #f0f4fa;
             border-radius: 30px;
-            color: #0a2463;
+            color: #191970;
             text-decoration: none;
             font-size: 0.8rem;
             font-weight: 500;
@@ -690,11 +772,11 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
         .insight-action:hover {
-            background: #0a2463;
+            background: #191970;
             color: white;
         }
 
-        /* Analytics Section */
+        /* Analytics Row */
         .analytics-row {
             display: grid;
             grid-template-columns: 1.5fr 1fr;
@@ -721,11 +803,11 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .chart-header h2, .forecast-header h2, .activity-header h2, .risk-header h2 {
             font-size: 1.2rem;
             font-weight: 600;
-            color: #0a2463;
+            color: #191970;
         }
 
         .badge-ai {
-            background: linear-gradient(135deg, #0a2463 0%, #1e3a8a 100%);
+            background: linear-gradient(135deg, #191970 0%, #2a2a9e 100%);
             color: white;
             padding: 4px 12px;
             border-radius: 30px;
@@ -751,19 +833,18 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         .chart-bar {
             width: 100%;
-            background: linear-gradient(to top, #0a2463, #1e3a8a);
+            background: linear-gradient(to top, #191970, #2a2a9e);
             border-radius: 8px 8px 0 0;
             min-height: 4px;
             transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
             cursor: pointer;
             opacity: 0.9;
-            box-shadow: 0 -2px 5px rgba(10, 36, 99, 0.2);
+            box-shadow: 0 -2px 5px rgba(25, 25, 112, 0.2);
         }
 
         .chart-bar:hover {
             opacity: 1;
-            background: linear-gradient(to top, #1e3a8a, #2e4a9a);
         }
 
         .chart-bar:hover::after {
@@ -772,7 +853,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             top: -30px;
             left: 50%;
             transform: translateX(-50%);
-            background: #0a2463;
+            background: #191970;
             color: white;
             padding: 4px 10px;
             border-radius: 6px;
@@ -833,7 +914,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .forecast-value {
             font-weight: 700;
             font-size: 1.2rem;
-            color: #0a2463;
+            color: #191970;
         }
 
         .forecast-label {
@@ -878,7 +959,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .risk-percentage {
             width: 50px;
             font-weight: 600;
-            color: #0a2463;
+            color: #191970;
             font-size: 0.9rem;
             text-align: right;
         }
@@ -905,13 +986,13 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             background: white;
             border-color: #e1e9f0;
             transform: translateX(5px);
-            box-shadow: 0 4px 12px rgba(10, 36, 99, 0.05);
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.05);
         }
 
         .activity-icon {
             width: 44px;
             height: 44px;
-            background: linear-gradient(135deg, #0a2463 0%, #1e3a8a 100%);
+            background: linear-gradient(135deg, #191970 0%, #2a2a9e 100%);
             border-radius: 12px;
             display: flex;
             align-items: center;
@@ -927,7 +1008,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .activity-title {
             font-weight: 600;
             font-size: 0.95rem;
-            color: #0a2463;
+            color: #191970;
             margin-bottom: 4px;
         }
 
@@ -970,7 +1051,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .clearance-header h2 {
             font-size: 1.2rem;
             font-weight: 600;
-            color: #0a2463;
+            color: #191970;
         }
 
         .clearance-stats {
@@ -990,7 +1071,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .clearance-stat-value {
             font-size: 2rem;
             font-weight: 700;
-            color: #0a2463;
+            color: #191970;
             margin-bottom: 8px;
         }
 
@@ -1058,7 +1139,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             font-weight: 600;
         }
 
-        /* Incident Types */
+        /* Incident Tags */
         .incident-tags {
             display: flex;
             flex-wrap: wrap;
@@ -1072,14 +1153,14 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             border-radius: 40px;
             font-size: 0.85rem;
             font-weight: 500;
-            color: #0a2463;
+            color: #191970;
             display: flex;
             align-items: center;
             gap: 8px;
         }
 
         .incident-tag span {
-            background: #0a2463;
+            background: #191970;
             color: white;
             padding: 2px 8px;
             border-radius: 30px;
@@ -1095,7 +1176,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .quick-actions h2 {
             font-size: 1.2rem;
             font-weight: 600;
-            color: #0a2463;
+            color: #191970;
             margin-bottom: 20px;
         }
 
@@ -1118,14 +1199,14 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         .action-card:hover {
             transform: translateY(-6px);
-            border-color: #0a2463;
-            box-shadow: 0 15px 30px rgba(10, 36, 99, 0.1);
+            border-color: #191970;
+            box-shadow: 0 15px 30px rgba(25, 25, 112, 0.1);
         }
 
         .action-icon {
             width: 64px;
             height: 64px;
-            background: linear-gradient(135deg, #0a2463 0%, #1e3a8a 100%);
+            background: linear-gradient(135deg, #191970 0%, #2a2a9e 100%);
             border-radius: 16px;
             display: flex;
             align-items: center;
@@ -1138,13 +1219,13 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         .action-card:hover .action-icon {
             transform: scale(1.05);
-            box-shadow: 0 10px 20px rgba(10, 36, 99, 0.3);
+            box-shadow: 0 10px 20px rgba(25, 25, 112, 0.3);
         }
 
         .action-card span {
             display: block;
             font-weight: 600;
-            color: #0a2463;
+            color: #191970;
             font-size: 0.95rem;
         }
 
@@ -1161,12 +1242,12 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         /* Responsive */
         @media (max-width: 1400px) {
-            .insights-grid {
+            .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
             
-            .stats-grid {
-                grid-template-columns: repeat(3, 1fr);
+            .insights-grid {
+                grid-template-columns: repeat(2, 1fr);
             }
             
             .clearance-stats {
@@ -1185,10 +1266,6 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
         @media (max-width: 992px) {
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
             .insights-grid {
                 grid-template-columns: 1fr;
             }
@@ -1232,13 +1309,13 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #0a2463;
+            color: #191970;
             cursor: pointer;
             transition: all 0.3s ease;
         }
 
         .refresh-btn:hover {
-            background: #0a2463;
+            background: #191970;
             color: white;
             transform: rotate(90deg);
         }
@@ -1296,8 +1373,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <h3><?php echo $stats['total_students']; ?></h3>
                             <p>Total Students</p>
                             <div class="stat-trend">
-                                <span class="trend-up"><i class="fas fa-arrow-up"></i> 8%</span>
-                                <span>vs last month</span>
+                                <span class="trend-up"><i class="fas fa-arrow-up"></i> Active</span>
                             </div>
                         </div>
                     </div>
@@ -1310,8 +1386,20 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <h3><?php echo $stats['active_clearances']; ?></h3>
                             <p>Active Clearances</p>
                             <div class="stat-trend">
-                                <span class="trend-up"><i class="fas fa-arrow-up"></i> 12%</span>
-                                <span>vs last week</span>
+                                <span class="trend-up"><i class="fas fa-arrow-up"></i> Valid</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-hourglass-half"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['pending_requests']; ?></h3>
+                            <p>Pending Requests</p>
+                            <div class="stat-trend">
+                                <span class="trend-neutral"><i class="fas fa-clock"></i> Awaiting</span>
                             </div>
                         </div>
                     </div>
@@ -1324,14 +1412,14 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <h3><?php echo $stats['monthly_incidents']; ?></h3>
                             <p>Incidents (This Month)</p>
                             <div class="stat-trend">
-                                <span class="trend-down"><i class="fas fa-arrow-down"></i> 5%</span>
-                                <span>vs last month</span>
+                                <span class="trend-down"><i class="fas fa-arrow-down"></i> Monitor</span>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- AI Insights Cards -->
+                <?php if (!empty($insights)): ?>
                 <div class="insights-grid">
                     <?php foreach ($insights as $insight): ?>
                     <div class="insight-card <?php echo $insight['type']; ?>">
@@ -1350,6 +1438,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     </div>
                     <?php endforeach; ?>
                 </div>
+                <?php endif; ?>
 
                 <!-- Analytics Row: Chart & Forecast -->
                 <div class="analytics-row">
@@ -1386,7 +1475,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <?php foreach ($forecast as $day): 
                                 $risk_class = 'medium';
                                 if ($day['predicted'] >= 8) $risk_class = 'high';
-                                elseif ($day['predicted'] <= 4) $risk_class = 'low';
+                                elseif ($day['predicted'] <= 3) $risk_class = 'low';
                             ?>
                             <div class="forecast-item <?php echo $risk_class; ?>">
                                 <div>
@@ -1414,9 +1503,9 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <div class="risk-list">
                             <?php foreach ($high_risk_locations as $location): ?>
                             <div class="risk-item">
-                                <span class="risk-location"><?php echo htmlspecialchars($location['location']); ?></span>
+                                <span class="risk-location"><?php echo htmlspecialchars($location['location'] ?: 'Unknown'); ?></span>
                                 <div class="risk-bar-container">
-                                    <div class="risk-bar" style="width: <?php echo $location['percentage']; ?>%;"></div>
+                                    <div class="risk-bar" style="width: <?php echo $location['percentage'] ?? 0; ?>%;"></div>
                                 </div>
                                 <span class="risk-percentage"><?php echo $location['incident_count']; ?> cases</span>
                             </div>
@@ -1443,6 +1532,8 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                         <i class="fas fa-user-md"></i>
                                     <?php elseif ($activity['type'] == 'incident'): ?>
                                         <i class="fas fa-exclamation"></i>
+                                    <?php elseif ($activity['type'] == 'dispensing'): ?>
+                                        <i class="fas fa-pills"></i>
                                     <?php else: ?>
                                         <i class="fas fa-file-alt"></i>
                                     <?php endif; ?>
@@ -1490,7 +1581,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                     <?php if (!empty($clearance_demand)): ?>
                     <div style="margin-top: 25px;">
-                        <h3 style="font-size: 1rem; color: #0a2463; margin-bottom: 15px;">Demand by Type (Last 60 Days)</h3>
+                        <h3 style="font-size: 1rem; color: #191970; margin-bottom: 15px;">Demand by Type (Last 60 Days)</h3>
                         <div class="incident-tags">
                             <?php foreach ($clearance_demand as $demand): ?>
                             <div class="incident-tag">
@@ -1507,7 +1598,7 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="clearance-section">
                     <div class="clearance-header">
                         <h2>Stock Expiry Alerts</h2>
-                        <a href="inventory.php" class="insight-action">View Inventory</a>
+                        <a href="clinic_stock.php" class="insight-action">View Inventory</a>
                     </div>
                     <table class="expiry-table">
                         <thead>
@@ -1524,13 +1615,13 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($item['item_name']); ?></strong></td>
                                 <td><?php echo $item['category']; ?></td>
-                                <td class="<?php echo $item['quantity'] <= $item['minimum_stock'] ? 'stock-low' : ''; ?>">
+                                <td class="<?php echo ($item['quantity'] <= $item['minimum_stock']) ? 'stock-low' : ''; ?>">
                                     <?php echo $item['quantity']; ?> <?php echo $item['unit'] ?? ''; ?>
                                 </td>
-                                <td><?php echo date('M d, Y', strtotime($item['expiry_date'])); ?></td>
+                                <td><?php echo $item['expiry_date'] ? date('M d, Y', strtotime($item['expiry_date'])) : 'N/A'; ?></td>
                                 <td>
                                     <?php 
-                                    if ($item['days_until_expiry'] <= 0) {
+                                    if (!isset($item['days_until_expiry']) || $item['days_until_expiry'] <= 0) {
                                         echo '<span class="expiry-badge expiry-critical">Expired</span>';
                                     } elseif ($item['days_until_expiry'] <= 30) {
                                         echo '<span class="expiry-badge expiry-warning">Expiring soon</span>';
@@ -1546,16 +1637,27 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 </div>
                 <?php endif; ?>
 
+                <!-- Incident Types -->
+                <?php if (!empty($incident_types)): ?>
+                <div class="clearance-section">
+                    <div class="clearance-header">
+                        <h2>Incident Types (Last 30 Days)</h2>
+                        <a href="incidents.php" class="insight-action">View All</a>
+                    </div>
+                    <div class="incident-tags">
+                        <?php foreach ($incident_types as $type): ?>
+                        <div class="incident-tag">
+                            <?php echo $type['incident_type']; ?> <span><?php echo $type['count']; ?></span>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+
                 <!-- Quick Actions -->
                 <div class="quick-actions">
                     <h2>Quick Actions</h2>
                     <div class="actions-grid">
-                        <a href="add_patient.php" class="action-card">
-                            <div class="action-icon">
-                                <i class="fas fa-user-plus"></i>
-                            </div>
-                            <span>Add Student</span>
-                        </a>
                         <a href="clearance_requests.php?action=new" class="action-card">
                             <div class="action-icon">
                                 <i class="fas fa-file-signature"></i>
@@ -1574,7 +1676,13 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             </div>
                             <span>Log Visit</span>
                         </a>
-                        <a href="inventory.php?action=request" class="action-card">
+                        <a href="physical_exam_records.php?action=new" class="action-card">
+                            <div class="action-icon">
+                                <i class="fas fa-heartbeat"></i>
+                            </div>
+                            <span>Physical Exam</span>
+                        </a>
+                        <a href="medicine_requests.php?action=new" class="action-card">
                             <div class="action-icon">
                                 <i class="fas fa-boxes"></i>
                             </div>
@@ -1619,14 +1727,6 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if (pageTitle) {
             pageTitle.textContent = 'Analytics Dashboard';
         }
-
-        // Tooltip enhancements
-        const forecastItems = document.querySelectorAll('.forecast-item');
-        forecastItems.forEach(item => {
-            item.addEventListener('click', () => {
-                console.log('Forecast item clicked');
-            });
-        });
     </script>
 </body>
 </html>
