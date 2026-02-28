@@ -14,62 +14,56 @@ $db = $database->getConnection();
 // Get real statistics from database
 $stats = [];
 
-// Total unique students across all tables
-$query = "SELECT COUNT(DISTINCT student_id) as total FROM clearance_requests";
+// Total unique students/patients from various tables
+$query = "SELECT COUNT(DISTINCT student_id) as total FROM (
+            SELECT student_id FROM clearance_requests
+            UNION
+            SELECT student_id FROM incidents
+            UNION
+            SELECT student_id FROM visit_history
+            UNION
+            SELECT student_id FROM physical_exam_records
+          ) as all_students";
 $stmt = $db->query($query);
-$clearance_students = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$stats['total_students'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
-$query = "SELECT COUNT(DISTINCT student_id) as total FROM incidents";
-$stmt = $db->query($query);
-$incident_students = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
-
-$query = "SELECT COUNT(DISTINCT student_id) as total FROM visit_history";
-$stmt = $db->query($query);
-$visit_students = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
-
-$stats['patients'] = max($clearance_students, $incident_students, $visit_students);
-
-// Today's appointments/visits
-$query = "SELECT COUNT(*) as total FROM visit_history WHERE visit_date = CURDATE()";
-$stmt = $db->query($query);
-$stats['today_appointments'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
-
-// Total staff (excluding superadmin)
-$query = "SELECT COUNT(*) as total FROM users WHERE role IN ('admin', 'staff', 'nurse')";
-$stmt = $db->query($query);
-$stats['staff'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
-
-// Today's visits (medical records)
+// Today's appointments (using visit_history for today)
 $query = "SELECT COUNT(*) as total FROM visit_history WHERE visit_date = CURDATE()";
 $stmt = $db->query($query);
 $stats['today_visits'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Additional stats for AI analytics
 // Pending clearance requests
 $query = "SELECT COUNT(*) as total FROM clearance_requests WHERE status = 'Pending'";
 $stmt = $db->query($query);
-$stats['pending_clearance'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$stats['pending_clearances'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Low stock items
+// Low stock items (quantity <= minimum_stock)
 $query = "SELECT COUNT(*) as total FROM clinic_stock WHERE quantity <= minimum_stock";
 $stmt = $db->query($query);
 $stats['low_stock'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Active incidents today
-$query = "SELECT COUNT(*) as total FROM incidents WHERE incident_date = CURDATE()";
+// Active staff/users
+$query = "SELECT COUNT(*) as total FROM users WHERE role IN ('admin', 'nurse', 'staff')";
 $stmt = $db->query($query);
-$stats['today_incidents'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$stats['active_staff'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Recent visits from visit_history
-$query = "SELECT v.*, u.full_name as doctor_name 
-          FROM visit_history v 
-          LEFT JOIN users u ON v.attended_by = u.id 
-          ORDER BY v.visit_date DESC, v.visit_time DESC 
-          LIMIT 8";
+// Recent incidents/emergencies
+$query = "SELECT i.*, u.full_name as reported_by_name 
+          FROM incidents i
+          LEFT JOIN users u ON i.created_by = u.id
+          ORDER BY i.created_at DESC 
+          LIMIT 5";
 $stmt = $db->query($query);
-$recent_visits = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$recent_incidents = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Weekly activity data from visit_history
+// Recent clearance requests
+$query = "SELECT * FROM clearance_requests 
+          ORDER BY created_at DESC 
+          LIMIT 5";
+$stmt = $db->query($query);
+$recent_clearances = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Weekly visit data
 $query = "SELECT 
             DAYNAME(visit_date) as day,
             COUNT(*) as count
@@ -78,136 +72,174 @@ $query = "SELECT
           GROUP BY DAYNAME(visit_date)
           ORDER BY FIELD(DAYNAME(visit_date), 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')";
 $stmt = $db->query($query);
-$weekly_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$weekly_visits = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$days = [];
-$counts = [];
+// Process weekly data
+$days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+$visit_counts = array_fill(0, 7, 0);
 $days_map = [
-    'Monday' => 'Mon',
-    'Tuesday' => 'Tue',
-    'Wednesday' => 'Wed',
-    'Thursday' => 'Thu',
-    'Friday' => 'Fri',
-    'Saturday' => 'Sat',
-    'Sunday' => 'Sun'
+    'Monday' => 0, 'Tuesday' => 1, 'Wednesday' => 2, 
+    'Thursday' => 3, 'Friday' => 4, 'Saturday' => 5, 'Sunday' => 6
 ];
 
-foreach ($weekly_data as $data) {
-    $days[] = $days_map[$data['day']] ?? substr($data['day'], 0, 3);
-    $counts[] = $data['count'];
+foreach ($weekly_visits as $data) {
+    if (isset($days_map[$data['day']])) {
+        $visit_counts[$days_map[$data['day']]] = (int)$data['count'];
+    }
 }
 
-// Fill in missing days with zero
-$all_days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-$filled_counts = [];
-foreach ($all_days as $day) {
-    $index = array_search($day, $days);
-    $filled_counts[] = $index !== false ? $counts[$index] : 0;
-}
-$counts = $filled_counts;
-$days = $all_days;
-
-// Get recent activity for AI analysis - FIXED COLUMN NAMES
-$query = "SELECT 'visit' as type, student_name, visit_date, visit_time, complaint 
-          FROM visit_history 
-          WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-          UNION ALL
-          SELECT 'incident' as type, student_name, incident_date, incident_time, description 
-          FROM incidents 
-          WHERE incident_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-          UNION ALL
-          SELECT 'clearance' as type, student_name, request_date, NULL, purpose 
-          FROM clearance_requests 
-          WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-          ORDER BY visit_date DESC, visit_time DESC
-          LIMIT 10";
-$stmt = $db->query($query);
-$recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// AI Analytics: Calculate trends and predictions
-$trends = [];
-
-// Patient visit trend (compare with last week)
+// Get stock usage data for analytics
 $query = "SELECT 
-            COUNT(*) as this_week,
-            (SELECT COUNT(*) FROM visit_history WHERE visit_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 14 DAY) AND DATE_SUB(CURDATE(), INTERVAL 7 DAY)) as last_week
-          FROM visit_history 
-          WHERE visit_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND CURDATE()";
+            category,
+            COUNT(*) as total_items,
+            SUM(quantity) as total_quantity,
+            SUM(CASE WHEN quantity <= minimum_stock THEN 1 ELSE 0 END) as low_stock_items
+          FROM clinic_stock
+          GROUP BY category";
 $stmt = $db->query($query);
-$visit_trend = $stmt->fetch(PDO::FETCH_ASSOC);
-$trends['visit_change'] = $visit_trend['last_week'] > 0 
-    ? round((($visit_trend['this_week'] - $visit_trend['last_week']) / $visit_trend['last_week']) * 100, 1)
-    : 100;
+$stock_analytics = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Most common complaints
-$query = "SELECT complaint, COUNT(*) as count 
-          FROM visit_history 
+// Get clearance type distribution
+$query = "SELECT 
+            clearance_type,
+            COUNT(*) as count,
+            SUM(CASE WHEN status = 'Pending' THEN 1 ELSE 0 END) as pending_count
+          FROM clearance_requests
+          GROUP BY clearance_type";
+$stmt = $db->query($query);
+$clearance_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// AI-Powered Analytics
+$ai_insights = [];
+
+// 1. Predict peak hours based on historical data
+$query = "SELECT 
+            HOUR(visit_time) as hour,
+            COUNT(*) as visit_count,
+            AVG(COUNT(*)) OVER() as avg_visits
+          FROM visit_history
           WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-          AND complaint IS NOT NULL 
-          AND complaint != ''
-          GROUP BY complaint 
-          ORDER BY count DESC 
+          GROUP BY HOUR(visit_time)
+          ORDER BY visit_count DESC
+          LIMIT 3";
+$stmt = $db->query($query);
+$peak_hours = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+if (!empty($peak_hours)) {
+    $peak_times = [];
+    foreach ($peak_hours as $hour) {
+        $time_period = $hour['hour'] < 12 ? 'morning' : ($hour['hour'] < 17 ? 'afternoon' : 'evening');
+        $peak_times[] = date('g A', strtotime($hour['hour'] . ':00'));
+    }
+    $ai_insights[] = "📊 Peak visit times: " . implode(', ', $peak_times) . ". Consider scheduling more staff during these hours.";
+}
+
+// 2. Clearance approval rate prediction
+$query = "SELECT 
+            COUNT(*) as total_requests,
+            SUM(CASE WHEN status = 'Approved' THEN 1 ELSE 0 END) as approved,
+            SUM(CASE WHEN status = 'Pending' THEN 1 ELSE 0 END) as pending
+          FROM clearance_requests
+          WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+$stmt = $db->query($query);
+$clearance_stats = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if ($clearance_stats['total_requests'] > 0) {
+    $approval_rate = round(($clearance_stats['approved'] / $clearance_stats['total_requests']) * 100);
+    $pending_rate = round(($clearance_stats['pending'] / $clearance_stats['total_requests']) * 100);
+    $ai_insights[] = "📋 Clearance approval rate is {$approval_rate}% with {$pending_rate}% pending. " . 
+                     ($pending_rate > 30 ? "Consider reviewing pending requests to reduce backlog." : "Current processing efficiency is good.");
+}
+
+// 3. Stock depletion prediction
+$query = "SELECT 
+            item_name,
+            quantity,
+            minimum_stock,
+            (SELECT AVG(quantity) FROM dispensing_log WHERE item_code = cs.item_code AND dispensed_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)) as avg_monthly_usage
+          FROM clinic_stock cs
+          WHERE quantity > 0";
+$stmt = $db->query($query);
+$stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$critical_items = [];
+foreach ($stock_items as $item) {
+    if ($item['avg_monthly_usage'] > 0) {
+        $months_remaining = $item['quantity'] / $item['avg_monthly_usage'];
+        if ($months_remaining < 1) {
+            $critical_items[] = $item['item_name'] . " (will last " . round($months_remaining * 30) . " days)";
+        }
+    }
+}
+
+if (!empty($critical_items)) {
+    $ai_insights[] = "⚠️ Critical stock alert: " . implode(', ', array_slice($critical_items, 0, 3)) . 
+                     (count($critical_items) > 3 ? " and " . (count($critical_items) - 3) . " more items need reordering soon." : " need immediate reordering.");
+} else {
+    $ai_insights[] = "✅ Stock levels are healthy. No critical items identified in the next 30 days.";
+}
+
+// 4. Common symptoms/conditions trend
+$query = "SELECT 
+            complaint,
+            COUNT(*) as frequency,
+            CONCAT(ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 1), '%') as percentage
+          FROM visit_history
+          WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+          GROUP BY complaint
+          ORDER BY frequency DESC
           LIMIT 3";
 $stmt = $db->query($query);
 $common_complaints = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Medicine usage prediction
-$query = "SELECT item_name, SUM(quantity) as total_used 
-          FROM dispensing_log 
-          WHERE dispensed_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-          GROUP BY item_name 
-          ORDER BY total_used DESC 
-          LIMIT 5";
-$stmt = $db->query($query);
-$medicine_usage = $stmt->fetchAll(PDO::FETCH_ASSOC);
+if (!empty($common_complaints)) {
+    $complaint_list = [];
+    foreach ($common_complaints as $complaint) {
+        $complaint_list[] = $complaint['complaint'] . " (" . $complaint['percentage'] . ")";
+    }
+    $ai_insights[] = "🩺 Most common complaints this month: " . implode(', ', $complaint_list) . 
+                     ". Ensure adequate supplies for these conditions.";
+}
 
-// Peak hours analysis
+// 5. Incident trend analysis
 $query = "SELECT 
-            CASE 
-              WHEN HOUR(visit_time) BETWEEN 8 AND 11 THEN 'Morning (8-11)'
-              WHEN HOUR(visit_time) BETWEEN 12 AND 16 THEN 'Afternoon (12-4)'
-              WHEN HOUR(visit_time) BETWEEN 17 AND 20 THEN 'Evening (5-8)'
-              ELSE 'Night (8+)'
-            END as time_slot,
-            COUNT(*) as count
-          FROM visit_history
-          WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-          AND visit_time IS NOT NULL
-          GROUP BY time_slot
-          ORDER BY count DESC";
+            incident_type,
+            COUNT(*) as count,
+            DATE_FORMAT(incident_date, '%Y-%m') as month
+          FROM incidents
+          WHERE incident_date >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+          GROUP BY incident_type, DATE_FORMAT(incident_date, '%Y-%m')
+          ORDER BY month DESC, count DESC";
 $stmt = $db->query($query);
-$peak_hours = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$incident_trends = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Clearance approval rate
+$incident_types = [];
+foreach ($incident_trends as $trend) {
+    if (!isset($incident_types[$trend['incident_type']])) {
+        $incident_types[$trend['incident_type']] = 0;
+    }
+    $incident_types[$trend['incident_type']] += $trend['count'];
+}
+
+if (!empty($incident_types)) {
+    arsort($incident_types);
+    $top_incident = key($incident_types);
+    $ai_insights[] = "🚨 Most frequent incident type: {$top_incident}. " . 
+                     "Consider implementing preventive measures in this area.";
+}
+
+// 6. Deworming schedule prediction
 $query = "SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'Approved' THEN 1 ELSE 0 END) as approved
-          FROM clearance_requests
-          WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+            COUNT(*) as students_due
+          FROM deworming_records
+          WHERE next_dose_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+          AND next_dose_date >= CURDATE()";
 $stmt = $db->query($query);
-$clearance_stats = $stmt->fetch(PDO::FETCH_ASSOC);
-$approval_rate = $clearance_stats['total'] > 0 
-    ? round(($clearance_stats['approved'] / $clearance_stats['total']) * 100, 1)
-    : 0;
+$deworming_due = $stmt->fetch(PDO::FETCH_ASSOC)['students_due'];
 
-// Stock prediction (items that will run out soon) - FIXED SUBQUERY
-$query = "SELECT cs.item_name, cs.quantity, cs.minimum_stock,
-          ROUND(cs.quantity / NULLIF((SELECT AVG(quantity) FROM dispensing_log dl WHERE dl.item_name = cs.item_name AND dl.dispensed_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)), 0)) as days_remaining
-          FROM clinic_stock cs
-          WHERE cs.quantity <= cs.minimum_stock * 2
-          ORDER BY cs.quantity ASC 
-          LIMIT 5";
-$stmt = $db->query($query);
-$low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Incident types analysis
-$query = "SELECT incident_type, COUNT(*) as count 
-          FROM incidents 
-          WHERE incident_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-          GROUP BY incident_type 
-          ORDER BY count DESC";
-$stmt = $db->query($query);
-$incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
+if ($deworming_due > 0) {
+    $ai_insights[] = "💊 {$deworming_due} student(s) are due for deworming in the next 7 days. Schedule appointments accordingly.";
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -218,735 +250,557 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
 
-        body {
-            font-family: 'Inter', sans-serif;
-            background: #eceff1;
-            min-height: 100vh;
-            position: relative;
-            overflow-x: hidden;
-        }
+    body {
+        font-family: 'Inter', sans-serif;
+        background: #eceff1;
+        min-height: 100vh;
+        position: relative;
+        overflow-x: hidden;
+    }
 
-        .admin-wrapper {
-            display: flex;
-            min-height: 100vh;
-            position: relative;
-        }
+    .admin-wrapper {
+        display: flex;
+        min-height: 100vh;
+        position: relative;
+    }
 
-        .main-content {
-            flex: 1;
-            margin-left: 320px;
-            padding: 20px 30px 30px 30px;
-            transition: margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
-            background: #eceff1;
-        }
+    .main-content {
+        flex: 1;
+        margin-left: 320px;
+        padding: 20px 30px 30px 30px;
+        transition: margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        background: #eceff1;
+    }
 
-        .main-content.expanded {
-            margin-left: 110px;
-        }
+    .main-content.expanded {
+        margin-left: 110px;
+    }
 
-        .dashboard-container {
-            position: relative;
-            z-index: 1;
-        }
+    .dashboard-container {
+        position: relative;
+        z-index: 1;
+    }
 
-        .welcome-section {
-            margin-bottom: 30px;
-            animation: fadeInUp 0.5s ease;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+    .welcome-section {
+        margin-bottom: 30px;
+        animation: fadeInUp 0.5s ease;
+    }
 
-        .welcome-section h1 {
-            font-size: 2.2rem;
-            font-weight: 700;
-            color: #191970;
-            margin-bottom: 8px;
-            letter-spacing: -0.5px;
-        }
+    .welcome-section h1 {
+        font-size: 2.2rem;
+        font-weight: 700;
+        color: #191970;
+        margin-bottom: 8px;
+        letter-spacing: -0.5px;
+    }
 
-        .welcome-section p {
-            color: #546e7a;
-            font-size: 1rem;
-            font-weight: 400;
-        }
+    .welcome-section p {
+        color: #546e7a;
+        font-size: 1rem;
+        font-weight: 400;
+    }
 
-        .ai-badge {
-            background: linear-gradient(135deg, #191970 0%, #4a4a9e 100%);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 30px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            box-shadow: 0 4px 10px rgba(25, 25, 112, 0.3);
-        }
+    /* AI Insights Banner */
+    .ai-insights {
+        background: linear-gradient(135deg, #191970 0%, #2a2a8a 100%);
+        border-radius: 16px;
+        padding: 20px 24px;
+        margin-bottom: 30px;
+        color: white;
+        box-shadow: 0 4px 20px rgba(25, 25, 112, 0.3);
+        animation: fadeInUp 0.55s ease;
+        border: 1px solid rgba(255,255,255,0.1);
+    }
 
-        .ai-badge svg {
-            width: 18px;
-            height: 18px;
-        }
+    .ai-insights-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+    }
 
-        /* Stats Grid */
+    .ai-insights-header h3 {
+        font-size: 1.2rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .ai-badge {
+        background: rgba(255,255,255,0.2);
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+    }
+
+    .insights-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 16px;
+    }
+
+    .insight-item {
+        background: rgba(255,255,255,0.1);
+        border-radius: 12px;
+        padding: 14px 16px;
+        font-size: 0.9rem;
+        line-height: 1.5;
+        backdrop-filter: blur(5px);
+        border: 1px solid rgba(255,255,255,0.05);
+        transition: all 0.3s ease;
+    }
+
+    .insight-item:hover {
+        background: rgba(255,255,255,0.15);
+        transform: translateX(5px);
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 20px;
+        margin-bottom: 30px;
+        animation: fadeInUp 0.6s ease;
+    }
+
+    .stat-card {
+        background: white;
+        border-radius: 16px;
+        padding: 20px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 1px solid #cfd8dc;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
+        border-color: #191970;
+    }
+
+    .stat-icon {
+        width: 52px;
+        height: 52px;
+        background: #191970;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 24px;
+    }
+
+    .stat-info {
+        flex: 1;
+    }
+
+    .stat-info h3 {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #191970;
+        margin-bottom: 2px;
+    }
+
+    .stat-info p {
+        color: #546e7a;
+        font-size: 0.7rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        margin-bottom: 6px;
+    }
+
+    .stat-trend {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.65rem;
+    }
+
+    .trend-up {
+        background: #e8f5e9;
+        color: #2e7d32;
+        padding: 3px 6px;
+        border-radius: 16px;
+        font-weight: 600;
+    }
+
+    .trend-down {
+        background: #ffebee;
+        color: #c62828;
+        padding: 3px 6px;
+        border-radius: 16px;
+        font-weight: 600;
+    }
+
+    .trend-warning {
+        background: #fff3e0;
+        color: #ef6c00;
+        padding: 3px 6px;
+        border-radius: 16px;
+        font-weight: 600;
+    }
+
+    /* Analytics Section */
+    .analytics-section {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr;
+        gap: 24px;
+        margin-bottom: 30px;
+        animation: fadeInUp 0.7s ease;
+    }
+
+    .chart-card, .distribution-card {
+        background: white;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 1px solid #cfd8dc;
+    }
+
+    .chart-header, .distribution-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+    }
+
+    .chart-header h2, .distribution-header h2 {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #191970;
+    }
+
+    .chart-container {
+        height: 200px;
+        display: flex;
+        align-items: flex-end;
+        gap: 12px;
+    }
+
+    .chart-bar-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .chart-bar {
+        width: 100%;
+        background: linear-gradient(180deg, #191970 0%, #2a2a8a 100%);
+        border-radius: 8px 8px 0 0;
+        min-height: 4px;
+        transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        cursor: pointer;
+        opacity: 0.9;
+    }
+
+    .chart-bar:hover {
+        opacity: 1;
+        box-shadow: 0 -4px 12px rgba(25, 25, 112, 0.3);
+    }
+
+    .chart-bar:hover::after {
+        content: attr(data-count) ' visits';
+        position: absolute;
+        top: -30px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #191970;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        white-space: nowrap;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .chart-label {
+        font-size: 0.7rem;
+        color: #546e7a;
+        font-weight: 500;
+    }
+
+    .distribution-list {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .distribution-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .distribution-label {
+        width: 120px;
+        font-size: 0.9rem;
+        color: #37474f;
+        font-weight: 500;
+    }
+
+    .distribution-bar-container {
+        flex: 1;
+        height: 8px;
+        background: #eceff1;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .distribution-bar {
+        height: 100%;
+        background: #191970;
+        border-radius: 4px;
+        transition: width 0.5s ease;
+    }
+
+    .distribution-value {
+        min-width: 50px;
+        text-align: right;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #191970;
+    }
+
+    /* Tables Section */
+    .tables-section {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+        margin-bottom: 30px;
+        animation: fadeInUp 0.8s ease;
+    }
+
+    .recent-card {
+        background: white;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 1px solid #cfd8dc;
+    }
+
+    .card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+    }
+
+    .card-header h2 {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #191970;
+    }
+
+    .view-all {
+        color: #191970;
+        text-decoration: none;
+        font-size: 0.85rem;
+        font-weight: 500;
+        padding: 5px 12px;
+        background: #eceff1;
+        border-radius: 20px;
+        border: 1px solid #cfd8dc;
+        transition: all 0.3s ease;
+    }
+
+    .view-all:hover {
+        background: #191970;
+        color: white;
+        border-color: #191970;
+    }
+
+    .incident-list, .clearance-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .incident-item, .clearance-item {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 14px;
+        background: #eceff1;
+        border-radius: 12px;
+        transition: all 0.3s ease;
+        border: 1px solid transparent;
+    }
+
+    .incident-item:hover, .clearance-item:hover {
+        background: white;
+        border-color: #191970;
+        transform: translateX(5px);
+        box-shadow: 0 2px 8px rgba(25, 25, 112, 0.1);
+    }
+
+    .incident-icon, .clearance-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+    }
+
+    .incident-icon.emergency { background: #d32f2f; }
+    .incident-icon.incident { background: #1976d2; }
+    .incident-icon.minor { background: #f57c00; }
+    .clearance-icon { background: #191970; }
+
+    .incident-content, .clearance-content {
+        flex: 1;
+    }
+
+    .incident-title {
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: #191970;
+        margin-bottom: 4px;
+    }
+
+    .incident-meta, .clearance-meta {
+        display: flex;
+        gap: 12px;
+        font-size: 0.7rem;
+        color: #78909c;
+    }
+
+    .status-badge {
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+
+    .status-approved { background: #e8f5e9; color: #2e7d32; }
+    .status-pending { background: #fff3e0; color: #ef6c00; }
+    .status-expired { background: #ffebee; color: #c62828; }
+
+    /* Quick Actions */
+    .quick-actions {
+        animation: fadeInUp 0.9s ease;
+    }
+
+    .quick-actions h2 {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #191970;
+        margin-bottom: 20px;
+    }
+
+    .actions-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 16px;
+    }
+
+    .action-card {
+        background: white;
+        border: 1px solid #cfd8dc;
+        border-radius: 16px;
+        padding: 20px;
+        text-align: center;
+        text-decoration: none;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+    }
+
+    .action-card:hover {
+        transform: translateY(-4px);
+        border-color: #191970;
+        box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
+    }
+
+    .action-icon {
+        width: 52px;
+        height: 52px;
+        background: #191970;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 12px;
+        color: white;
+        font-size: 24px;
+        transition: all 0.3s ease;
+    }
+
+    .action-card:hover .action-icon {
+        background: #2a2a8a;
+        transform: scale(1.05);
+    }
+
+    .action-card span {
+        display: block;
+        font-weight: 600;
+        color: #191970;
+        font-size: 0.85rem;
+    }
+
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    @media (max-width: 1400px) {
         .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 24px;
-            margin-bottom: 30px;
-            animation: fadeInUp 0.6s ease;
+            grid-template-columns: repeat(3, 1fr);
         }
-
-        .stat-card {
-            background: white;
-            border-radius: 16px;
-            padding: 24px;
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-            border: 1px solid #cfd8dc;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #191970, #4a4a9e);
-            transform: scaleX(0);
-            transition: transform 0.3s ease;
-        }
-
-        .stat-card:hover::before {
-            transform: scaleX(1);
-        }
-
-        .stat-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
-            border-color: #191970;
-        }
-
-        .stat-icon {
-            width: 60px;
-            height: 60px;
-            background: #191970;
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 28px;
-        }
-
-        .stat-info {
-            flex: 1;
-        }
-
-        .stat-info h3 {
-            font-size: 2rem;
-            font-weight: 700;
-            color: #191970;
-            margin-bottom: 4px;
-        }
-
-        .stat-info p {
-            color: #546e7a;
-            font-size: 0.8rem;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-        }
-
-        .stat-trend {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 0.7rem;
-        }
-
-        .trend-up {
-            background: #e8f5e9;
-            color: #2e7d32;
-            padding: 4px 8px;
-            border-radius: 20px;
-            font-weight: 600;
-        }
-
-        .trend-down {
-            background: #ffebee;
-            color: #c62828;
-            padding: 4px 8px;
-            border-radius: 20px;
-            font-weight: 600;
-        }
-
-        .trend-neutral {
-            background: #e3f2fd;
-            color: #1565c0;
-            padding: 4px 8px;
-            border-radius: 20px;
-            font-weight: 600;
-        }
-
-        /* AI Analytics Section */
-        .ai-analytics-section {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 20px;
-            margin-bottom: 30px;
-            animation: fadeInUp 0.65s ease;
-        }
-
-        .ai-card {
-            background: white;
-            border-radius: 16px;
-            padding: 20px;
-            border: 1px solid #cfd8dc;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-            transition: all 0.3s ease;
-        }
-
-        .ai-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
-            border-color: #191970;
-        }
-
-        .ai-card-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-
-        .ai-card-header svg {
-            width: 24px;
-            height: 24px;
-            color: #191970;
-        }
-
-        .ai-card-header h3 {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: #191970;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .ai-card-value {
-            font-size: 2rem;
-            font-weight: 700;
-            color: #191970;
-            margin-bottom: 8px;
-        }
-
-        .ai-card-trend {
-            font-size: 0.8rem;
-            color: #546e7a;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .ai-insight {
-            background: #eceff1;
-            border-radius: 8px;
-            padding: 10px;
-            margin-top: 12px;
-            font-size: 0.8rem;
-            color: #37474f;
-            border-left: 3px solid #191970;
-        }
-
-        .badge {
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.7rem;
-            font-weight: 600;
-        }
-
-        .badge-warning {
-            background: #fff3e0;
-            color: #e65100;
-        }
-
-        .badge-success {
-            background: #e8f5e9;
-            color: #2e7d32;
-        }
-
-        .badge-info {
-            background: #e3f2fd;
-            color: #1565c0;
-        }
-
-        .badge-danger {
-            background: #ffebee;
-            color: #c62828;
-        }
-
-        /* Analytics Section */
-        .analytics-section {
-            display: grid;
-            grid-template-columns: 1.5fr 1fr;
-            gap: 24px;
-            margin-bottom: 30px;
-            animation: fadeInUp 0.7s ease;
-        }
-
-        .chart-card, .activity-card, .insights-card {
-            background: white;
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-            border: 1px solid #cfd8dc;
-        }
-
-        .chart-header, .activity-header, .insights-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 24px;
-        }
-
-        .chart-header h2, .activity-header h2, .insights-header h2 {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #191970;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .chart-period {
-            display: flex;
-            gap: 8px;
-        }
-
-        .period-btn {
-            padding: 6px 14px;
-            background: #eceff1;
-            border: 1px solid #cfd8dc;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            color: #546e7a;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .period-btn:hover {
-            background: #191970;
-            color: white;
-            border-color: #191970;
-        }
-
-        .period-btn.active {
-            background: #191970;
-            color: white;
-            border-color: #191970;
-        }
-
-        .chart-container {
-            height: 250px;
-            position: relative;
-        }
-
-        .activity-list {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            max-height: 400px;
-            overflow-y: auto;
-        }
-
-        .activity-item {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            padding: 14px;
-            background: #eceff1;
-            border-radius: 12px;
-            transition: all 0.3s ease;
-            border: 1px solid transparent;
-        }
-
-        .activity-item:hover {
-            background: white;
-            border-color: #191970;
-            transform: translateX(5px);
-            box-shadow: 0 2px 8px rgba(25, 25, 112, 0.1);
-        }
-
-        .activity-icon {
-            width: 40px;
-            height: 40px;
-            background: #191970;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-        }
-
-        .activity-content {
-            flex: 1;
-        }
-
-        .activity-title {
-            font-weight: 600;
-            font-size: 0.9rem;
-            color: #191970;
-            margin-bottom: 4px;
-        }
-
-        .activity-time {
-            font-size: 0.7rem;
-            color: #78909c;
-        }
-
-        .activity-status {
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 0.7rem;
-            font-weight: 600;
-        }
-
-        .status-visit {
-            background: #e8f5e9;
-            color: #2e7d32;
-        }
-
-        .status-incident {
-            background: #ffebee;
-            color: #c62828;
-        }
-
-        .status-clearance {
-            background: #e3f2fd;
-            color: #1565c0;
-        }
-
-        .insights-grid {
-            display: grid;
-            gap: 16px;
-        }
-
-        .insight-item {
-            background: #eceff1;
-            border-radius: 12px;
-            padding: 16px;
-            border-left: 4px solid #191970;
-        }
-
-        .insight-item h4 {
-            font-size: 0.9rem;
-            color: #191970;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .insight-item p {
-            font-size: 0.85rem;
-            color: #37474f;
-            margin-bottom: 8px;
-        }
-
-        .insight-item .recommendation {
-            background: white;
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-size: 0.8rem;
-            color: #2e7d32;
-            border: 1px solid #c8e6c9;
-        }
-
-        /* Recent Section */
-        .recent-section {
-            background: white;
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 30px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-            border: 1px solid #cfd8dc;
-            animation: fadeInUp 0.8s ease;
-        }
-
-        .section-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 24px;
-        }
-
-        .section-header h2 {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #191970;
-        }
-
-        .view-all {
-            color: #191970;
-            text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 500;
-            padding: 6px 14px;
-            background: #eceff1;
-            border-radius: 20px;
-            border: 1px solid #cfd8dc;
-            transition: all 0.3s ease;
-        }
-
-        .view-all:hover {
-            background: #191970;
-            color: white;
-            border-color: #191970;
-        }
-
-        .table-wrapper {
-            overflow-x: auto;
-            border-radius: 12px;
-        }
-
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .data-table th {
-            text-align: left;
-            padding: 16px 12px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            color: #78909c;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border-bottom: 2px solid #cfd8dc;
-            background: #eceff1;
-        }
-
-        .data-table td {
-            padding: 16px 12px;
-            font-size: 0.9rem;
-            color: #37474f;
-            border-bottom: 1px solid #cfd8dc;
-        }
-
-        .patient-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .patient-avatar {
-            width: 40px;
-            height: 40px;
-            background: #191970;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 600;
-            font-size: 0.9rem;
-            color: white;
-        }
-
-        .patient-details {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .patient-name {
-            font-weight: 600;
-            color: #191970;
-            margin-bottom: 2px;
-        }
-
-        .patient-id {
-            font-size: 0.7rem;
-            color: #90a4ae;
-        }
-
-        .doctor-info {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .doctor-avatar {
-            width: 30px;
-            height: 30px;
-            background: #b0bec5;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.7rem;
-            font-weight: 600;
-            color: #37474f;
-        }
-
-        .status-badge {
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            display: inline-block;
-        }
-
-        .status-scheduled, .status-Pending {
-            background: #e3f2fd;
-            color: #1565c0;
-        }
-
-        .status-completed, .status-Approved {
-            background: #e8f5e9;
-            color: #2e7d32;
-        }
-
-        .status-cancelled, .status-Not\ Cleared {
-            background: #ffebee;
-            color: #c62828;
-        }
-
-        .action-btn-small {
-            padding: 8px 14px;
-            background: #eceff1;
-            border: 1px solid #cfd8dc;
-            border-radius: 6px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            color: #191970;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .action-btn-small:hover {
-            background: #191970;
-            color: white;
-            border-color: #191970;
-        }
-
-        /* Quick Actions */
-        .quick-actions {
-            animation: fadeInUp 0.9s ease;
-        }
-
-        .quick-actions h2 {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #191970;
-            margin-bottom: 20px;
-        }
-
         .actions-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 20px;
+            grid-template-columns: repeat(3, 1fr);
         }
+    }
 
-        .action-card {
-            background: white;
-            border: 1px solid #cfd8dc;
-            border-radius: 16px;
-            padding: 24px;
-            text-align: center;
-            text-decoration: none;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+    @media (max-width: 1200px) {
+        .analytics-section {
+            grid-template-columns: 1fr;
         }
+        .tables-section {
+            grid-template-columns: 1fr;
+        }
+    }
 
-        .action-card:hover {
-            transform: translateY(-4px);
-            border-color: #191970;
-            box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
+    @media (max-width: 768px) {
+        .main-content {
+            margin-left: 0;
+            padding: 20px 15px;
         }
-
-        .action-icon {
-            width: 64px;
-            height: 64px;
-            background: #191970;
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 16px;
-            color: white;
-            font-size: 28px;
-            transition: all 0.3s ease;
+        .stats-grid {
+            grid-template-columns: 1fr;
         }
-
-        .action-card:hover .action-icon {
-            background: #24248f;
-            transform: scale(1.05);
+        .actions-grid {
+            grid-template-columns: repeat(2, 1fr);
         }
-
-        .action-card span {
-            display: block;
-            font-weight: 600;
-            color: #191970;
-            font-size: 1rem;
+        .insights-grid {
+            grid-template-columns: 1fr;
         }
-
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        @media (max-width: 1280px) {
-            .stats-grid, .ai-analytics-section {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .analytics-section {
-                grid-template-columns: 1fr;
-            }
-            
-            .actions-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-        }
-
-        @media (max-width: 768px) {
-            .main-content {
-                margin-left: 0;
-                padding: 20px 15px;
-            }
-            
-            .stats-grid, .ai-analytics-section {
-                grid-template-columns: 1fr;
-            }
-            
-            .actions-grid {
-                grid-template-columns: 1fr;
-            }
-        }
+    }
     </style>
 </head>
 <body>
@@ -958,16 +812,29 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
             <div class="dashboard-container">
                 <div class="welcome-section">
-                    <div>
-                        <h1>Welcome back, <?php echo htmlspecialchars($_SESSION['username']); ?>! 👋</h1>
-                        <p>Here's what's happening with your clinic today.</p>
+                    <h1>Welcome back, <?php echo htmlspecialchars($_SESSION['username']); ?>! 👋</h1>
+                    <p>Here's your clinic overview and AI-powered insights for today.</p>
+                </div>
+
+                <!-- AI Insights Banner -->
+                <div class="ai-insights">
+                    <div class="ai-insights-header">
+                        <h3>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M12 16V12"/>
+                                <circle cx="12" cy="8" r="1" fill="white"/>
+                            </svg>
+                            AI-Powered Analytics
+                        </h3>
+                        <span class="ai-badge">Updated real-time</span>
                     </div>
-                    <div class="ai-badge">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/>
-                            <path d="M12 16v-4M12 8h.01"/>
-                        </svg>
-                        AI Analytics Active
+                    <div class="insights-grid">
+                        <?php foreach ($ai_insights as $insight): ?>
+                        <div class="insight-item">
+                            <?php echo $insight; ?>
+                        </div>
+                        <?php endforeach; ?>
                     </div>
                 </div>
 
@@ -975,456 +842,201 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="stats-grid">
                     <div class="stat-card">
                         <div class="stat-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
                                 <circle cx="12" cy="8" r="4"/>
                                 <path d="M5.5 20V19C5.5 17.1435 6.2375 15.363 7.55025 14.0503C8.86301 12.7375 10.6435 12 12.5 12C14.3565 12 16.137 12.7375 17.4497 14.0503C18.7625 15.363 19.5 17.1435 19.5 19V20"/>
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3><?php echo $stats['patients']; ?></h3>
+                            <h3><?php echo $stats['total_students']; ?></h3>
                             <p>Total Students</p>
                             <div class="stat-trend">
-                                <span class="trend-up">↑ Active</span>
-                                <span style="color: #546e7a;">unique students</span>
+                                <span class="trend-up">Active patients</span>
                             </div>
                         </div>
                     </div>
 
                     <div class="stat-card">
                         <div class="stat-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
                                 <circle cx="12" cy="12" r="10"/>
                                 <path d="M12 6V12L16 14"/>
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3><?php echo $stats['today_appointments']; ?></h3>
+                            <h3><?php echo $stats['today_visits']; ?></h3>
                             <p>Today's Visits</p>
                             <div class="stat-trend">
-                                <span class="<?php echo $trends['visit_change'] > 0 ? 'trend-up' : ($trends['visit_change'] < 0 ? 'trend-down' : 'trend-neutral'); ?>">
-                                    <?php echo $trends['visit_change'] > 0 ? '↑' : ($trends['visit_change'] < 0 ? '↓' : '→'); ?> 
-                                    <?php echo abs($trends['visit_change']); ?>%
-                                </span>
-                                <span style="color: #546e7a;">vs last week</span>
+                                <span class="trend-up">↑ <?php echo $stats['today_visits'] > 0 ? 'Active' : 'No visits yet'; ?></span>
                             </div>
                         </div>
                     </div>
 
                     <div class="stat-card">
                         <div class="stat-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
+                                <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999"/>
+                                <path d="M22 4L12 14.01L9 11.01"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['pending_clearances']; ?></h3>
+                            <p>Pending Clearances</p>
+                            <div class="stat-trend">
+                                <span class="<?php echo $stats['pending_clearances'] > 0 ? 'trend-warning' : 'trend-up'; ?>">
+                                    <?php echo $stats['pending_clearances'] > 0 ? 'Needs attention' : 'All cleared'; ?>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
+                                <path d="M20 12V18C20 19.1046 19.1046 20 18 20H6C4.89543 20 4 19.1046 4 18V12"/>
+                                <path d="M12 2V14M12 14L9 11M12 14L15 11"/>
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['low_stock']; ?></h3>
+                            <p>Low Stock Items</p>
+                            <div class="stat-trend">
+                                <span class="<?php echo $stats['low_stock'] > 0 ? 'trend-down' : 'trend-up'; ?>">
+                                    <?php echo $stats['low_stock'] > 0 ? 'Reorder needed' : 'Stock OK'; ?>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
                                 <path d="M17 21V19C17 16.7909 15.2091 15 13 15H5C2.79086 15 1 16.7909 1 19V21"/>
                                 <circle cx="9" cy="7" r="4"/>
                                 <path d="M23 21V19C22.9986 17.1771 21.765 15.5857 20 15.13"/>
-                                <path d="M16 3.13C17.7699 3.58317 19.0077 5.17799 19.0077 7.005C19.0077 8.83201 17.7699 10.4268 16 10.88"/>
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3><?php echo $stats['staff']; ?></h3>
+                            <h3><?php echo $stats['active_staff']; ?></h3>
                             <p>Active Staff</p>
                             <div class="stat-trend">
-                                <span class="trend-up">↑ Online</span>
-                                <span style="color: #546e7a;">medical team</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                <path d="M12 2L2 7L12 12L22 7L12 2Z"/>
-                                <path d="M2 17L12 22L22 17"/>
-                                <path d="M2 12L12 17L22 12"/>
-                            </svg>
-                        </div>
-                        <div class="stat-info">
-                            <h3><?php echo $stats['today_visits']; ?></h3>
-                            <p>Today's Records</p>
-                            <div class="stat-trend">
-                                <span class="trend-neutral">→ Processed</span>
-                                <span style="color: #546e7a;">medical records</span>
+                                <span class="trend-up">On duty</span>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- AI Analytics Cards -->
-                <div class="ai-analytics-section">
-                    <div class="ai-card">
-                        <div class="ai-card-header">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                                <circle cx="12" cy="7" r="4"/>
-                                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                            </svg>
-                            <h3>Pending Clearances</h3>
-                        </div>
-                        <div class="ai-card-value"><?php echo $stats['pending_clearance']; ?></div>
-                        <div class="ai-card-trend">
-                            <span class="badge badge-warning">Needs attention</span>
-                        </div>
-                        <div class="ai-insight">
-                            <strong>AI Insight:</strong> <?php echo $stats['pending_clearance'] > 0 ? 'Review pending clearances to avoid delays' : 'All clearances are up to date'; ?>
-                        </div>
-                    </div>
-
-                    <div class="ai-card">
-                        <div class="ai-card-header">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
-                                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
-                            </svg>
-                            <h3>Low Stock Items</h3>
-                        </div>
-                        <div class="ai-card-value"><?php echo $stats['low_stock']; ?></div>
-                        <div class="ai-card-trend">
-                            <span class="badge badge-warning">Reorder soon</span>
-                        </div>
-                        <div class="ai-insight">
-                            <strong>AI Prediction:</strong> 
-                            <?php 
-                            if (!empty($low_stock_items)) {
-                                echo htmlspecialchars($low_stock_items[0]['item_name']) . ' will run out soon';
-                            } else {
-                                echo 'Stock levels are healthy';
-                            }
-                            ?>
-                        </div>
-                    </div>
-
-                    <div class="ai-card">
-                        <div class="ai-card-header">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="12" r="10"/>
-                                <path d="M12 6v6l4 2"/>
-                            </svg>
-                            <h3>Today's Incidents</h3>
-                        </div>
-                        <div class="ai-card-value"><?php echo $stats['today_incidents']; ?></div>
-                        <div class="ai-card-trend">
-                            <span class="badge badge-info">Monitor</span>
-                        </div>
-                        <div class="ai-insight">
-                            <strong>Alert:</strong> <?php echo $stats['today_incidents'] > 0 ? 'Incidents reported today - review safety protocols' : 'No incidents reported today'; ?>
-                        </div>
-                    </div>
-
-                    <div class="ai-card">
-                        <div class="ai-card-header">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M22 12h-4l-3 9-4-18-3 9H2"/>
-                            </svg>
-                            <h3>Approval Rate</h3>
-                        </div>
-                        <div class="ai-card-value"><?php echo $approval_rate; ?>%</div>
-                        <div class="ai-card-trend">
-                            <span class="<?php echo $approval_rate > 70 ? 'badge-success' : 'badge-warning'; ?>">
-                                <?php echo $approval_rate > 70 ? 'Good' : 'Needs improvement'; ?>
-                            </span>
-                        </div>
-                        <div class="ai-insight">
-                            <strong>Efficiency:</strong> Clearance approval rate this month
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Analytics Section with Charts -->
+                <!-- Analytics Section -->
                 <div class="analytics-section">
                     <div class="chart-card">
                         <div class="chart-header">
-                            <h2>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                                    <path d="M3 3v18h18"/>
-                                    <path d="M18 17V9"/>
-                                    <path d="M12 17V5"/>
-                                    <path d="M6 17v-3"/>
-                                </svg>
-                                Weekly Visits
-                            </h2>
-                            <div class="chart-period">
-                                <button class="period-btn active" onclick="updateChart('week')">Week</button>
-                                <button class="period-btn" onclick="updateChart('month')">Month</button>
-                            </div>
+                            <h2>Weekly Visit Trends</h2>
                         </div>
                         <div class="chart-container">
-                            <canvas id="visitsChart"></canvas>
+                            <?php 
+                            $max_visits = !empty($visit_counts) ? max($visit_counts) : 1;
+                            foreach ($days as $index => $day): 
+                                $count = $visit_counts[$index] ?? 0;
+                                $height = $max_visits > 0 ? ($count / $max_visits) * 150 : 20;
+                                $height = max(20, $height);
+                            ?>
+                            <div class="chart-bar-wrapper">
+                                <div class="chart-bar" style="height: <?php echo $height; ?>px;" data-count="<?php echo $count; ?> visits"></div>
+                                <span class="chart-label"><?php echo $day; ?></span>
+                            </div>
+                            <?php endforeach; ?>
                         </div>
                     </div>
 
-                    <div class="activity-card">
-                        <div class="activity-header">
-                            <h2>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                                    <circle cx="12" cy="12" r="10"/>
-                                    <path d="M12 8v8"/>
-                                    <path d="M8 12h8"/>
-                                </svg>
-                                Recent Activity
-                            </h2>
-                            <a href="activity-log.php" class="view-all">View All</a>
+                    <div class="distribution-card">
+                        <div class="distribution-header">
+                            <h2>Clearance Types</h2>
                         </div>
-                        <div class="activity-list">
-                            <?php foreach ($recent_activities as $activity): ?>
-                            <div class="activity-item">
-                                <div class="activity-icon">
-                                    <?php if ($activity['type'] == 'visit'): ?>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
-                                            <circle cx="12" cy="8" r="4"/>
-                                            <path d="M5.5 20V19C5.5 17.1435 6.2375 15.363 7.55025 14.0503C8.86301 12.7375 10.6435 12 12.5 12C14.3565 12 16.137 12.7375 17.4497 14.0503C18.7625 15.363 19.5 17.1435 19.5 19V20"/>
-                                        </svg>
-                                    <?php elseif ($activity['type'] == 'incident'): ?>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
-                                            <circle cx="12" cy="12" r="10"/>
-                                            <path d="M12 8v4M12 16h.01"/>
-                                        </svg>
-                                    <?php else: ?>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
-                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
-                                            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
-                                        </svg>
-                                    <?php endif; ?>
+                        <div class="distribution-list">
+                            <?php 
+                            $total_clearances = array_sum(array_column($clearance_types, 'count')) ?: 1;
+                            foreach ($clearance_types as $type): 
+                                $percentage = round(($type['count'] / $total_clearances) * 100);
+                            ?>
+                            <div class="distribution-item">
+                                <span class="distribution-label"><?php echo $type['clearance_type']; ?></span>
+                                <div class="distribution-bar-container">
+                                    <div class="distribution-bar" style="width: <?php echo $percentage; ?>%;"></div>
                                 </div>
-                                <div class="activity-content">
-                                    <div class="activity-title">
-                                        <?php 
-                                        echo htmlspecialchars(substr($activity['student_name'], 0, 20)) . ' - ';
-                                        if ($activity['type'] == 'visit') {
-                                            echo 'Visit: ' . htmlspecialchars(substr($activity['complaint'] ?? '', 0, 30));
-                                        } elseif ($activity['type'] == 'incident') {
-                                            echo 'Incident: ' . htmlspecialchars(substr($activity['description'] ?? '', 0, 30));
-                                        } else {
-                                            echo 'Clearance: ' . htmlspecialchars(substr($activity['purpose'] ?? '', 0, 30));
-                                        }
-                                        ?>
-                                    </div>
-                                    <div class="activity-time">
-                                        <?php 
-                                        if ($activity['visit_date']) {
-                                            echo date('M d, Y', strtotime($activity['visit_date']));
-                                        } elseif ($activity['incident_date']) {
-                                            echo date('M d, Y', strtotime($activity['incident_date']));
-                                        } else {
-                                            echo date('M d, Y', strtotime($activity['request_date']));
-                                        }
-                                        if (!empty($activity['visit_time'])) {
-                                            echo ' at ' . date('h:i A', strtotime($activity['visit_time']));
-                                        } elseif (!empty($activity['incident_time'])) {
-                                            echo ' at ' . date('h:i A', strtotime($activity['incident_time']));
-                                        }
-                                        ?>
-                                    </div>
-                                </div>
-                                <span class="activity-status status-<?php echo $activity['type']; ?>">
-                                    <?php echo ucfirst($activity['type']); ?>
-                                </span>
+                                <span class="distribution-value"><?php echo $type['count']; ?> (<?php echo $percentage; ?>%)</span>
                             </div>
                             <?php endforeach; ?>
-                            <?php if (empty($recent_activities)): ?>
-                            <div class="activity-item">
-                                <div class="activity-content">
-                                    <div class="activity-title">No recent activity</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Incidents and Clearances -->
+                <div class="tables-section">
+                    <div class="recent-card">
+                        <div class="card-header">
+                            <h2>Recent Incidents</h2>
+                            <a href="incidents.php" class="view-all">View All</a>
+                        </div>
+                        <div class="incident-list">
+                            <?php foreach ($recent_incidents as $incident): ?>
+                            <div class="incident-item">
+                                <div class="incident-icon <?php echo strtolower($incident['incident_type']); ?>">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                                        <circle cx="12" cy="12" r="10"/>
+                                        <line x1="12" y1="8" x2="12" y2="12"/>
+                                        <circle cx="12" cy="16" r="1" fill="currentColor"/>
+                                    </svg>
                                 </div>
+                                <div class="incident-content">
+                                    <div class="incident-title"><?php echo htmlspecialchars($incident['student_name']); ?></div>
+                                    <div class="incident-meta">
+                                        <span><?php echo $incident['incident_type']; ?></span>
+                                        <span><?php echo date('M d, Y', strtotime($incident['incident_date'])); ?></span>
+                                        <span><?php echo $incident['incident_code']; ?></span>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php endforeach; ?>
+                            <?php if (empty($recent_incidents)): ?>
+                            <div style="text-align: center; padding: 30px; color: #78909c;">
+                                No recent incidents reported
                             </div>
                             <?php endif; ?>
                         </div>
                     </div>
-                </div>
 
-                <!-- AI Insights Section -->
-                <div class="analytics-section">
-                    <div class="insights-card">
-                        <div class="insights-header">
-                            <h2>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                                    <circle cx="12" cy="12" r="10"/>
-                                    <path d="M12 16v-4M12 8h.01"/>
-                                </svg>
-                                AI Health Insights
-                            </h2>
+                    <div class="recent-card">
+                        <div class="card-header">
+                            <h2>Clearance Requests</h2>
+                            <a href="clearance_requests.php" class="view-all">View All</a>
                         </div>
-                        <div class="insights-grid">
-                            <!-- Common Complaints -->
-                            <div class="insight-item">
-                                <h4>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                                        <circle cx="12" cy="7" r="4"/>
+                        <div class="clearance-list">
+                            <?php foreach ($recent_clearances as $clearance): ?>
+                            <div class="clearance-item">
+                                <div class="clearance-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                                        <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999"/>
+                                        <path d="M22 4L12 14.01L9 11.01"/>
                                     </svg>
-                                    Most Common Complaints
-                                </h4>
-                                <?php if (!empty($common_complaints)): ?>
-                                    <?php foreach ($common_complaints as $complaint): ?>
-                                    <p>• <?php echo htmlspecialchars($complaint['complaint']); ?> (<?php echo $complaint['count']; ?> cases)</p>
-                                    <?php endforeach; ?>
-                                    <div class="recommendation">
-                                        <strong>Recommendation:</strong> Stock up on relevant medicines
+                                </div>
+                                <div class="clearance-content">
+                                    <div class="incident-title"><?php echo htmlspecialchars($clearance['student_name']); ?></div>
+                                    <div class="incident-meta">
+                                        <span><?php echo $clearance['clearance_type']; ?></span>
+                                        <span class="status-badge status-<?php echo strtolower($clearance['status']); ?>">
+                                            <?php echo $clearance['status']; ?>
+                                        </span>
+                                        <span><?php echo $clearance['clearance_code']; ?></span>
                                     </div>
-                                <?php else: ?>
-                                    <p>No complaint data available</p>
-                                <?php endif; ?>
+                                </div>
                             </div>
-
-                            <!-- Incident Types -->
-                            <div class="insight-item">
-                                <h4>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                        <circle cx="12" cy="12" r="10"/>
-                                        <path d="M12 8v4M12 16h.01"/>
-                                    </svg>
-                                    Incident Types
-                                </h4>
-                                <?php if (!empty($incident_types)): ?>
-                                    <?php foreach ($incident_types as $incident): ?>
-                                    <p>• <?php echo htmlspecialchars($incident['incident_type']); ?>: <?php echo $incident['count']; ?> cases</p>
-                                    <?php endforeach; ?>
-                                    <div class="recommendation">
-                                        <strong>Safety Focus:</strong> Address most common incident types
-                                    </div>
-                                <?php else: ?>
-                                    <p>No incident data available</p>
-                                <?php endif; ?>
+                            <?php endforeach; ?>
+                            <?php if (empty($recent_clearances)): ?>
+                            <div style="text-align: center; padding: 30px; color: #78909c;">
+                                No clearance requests found
                             </div>
-
-                            <!-- Peak Hours -->
-                            <div class="insight-item">
-                                <h4>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                        <circle cx="12" cy="12" r="10"/>
-                                        <path d="M12 6v6l4 2"/>
-                                    </svg>
-                                    Peak Visit Hours
-                                </h4>
-                                <?php if (!empty($peak_hours)): ?>
-                                    <?php foreach ($peak_hours as $hour): ?>
-                                    <p>• <?php echo $hour['time_slot']; ?>: <?php echo $hour['count']; ?> visits</p>
-                                    <?php endforeach; ?>
-                                    <div class="recommendation">
-                                        <strong>Staffing:</strong> Ensure adequate staff during peak hours
-                                    </div>
-                                <?php else: ?>
-                                    <p>No peak hour data available</p>
-                                <?php endif; ?>
-                            </div>
+                            <?php endif; ?>
                         </div>
-                    </div>
-
-                    <!-- Stock Prediction Card -->
-                    <div class="insights-card">
-                        <div class="insights-header">
-                            <h2>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                                    <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
-                                    <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
-                                </svg>
-                                Stock Alerts & Medicine Usage
-                            </h2>
-                        </div>
-                        <div class="insights-grid">
-                            <!-- Medicine Usage -->
-                            <div class="insight-item">
-                                <h4>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                        <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
-                                        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
-                                    </svg>
-                                    Most Used Medicines
-                                </h4>
-                                <?php if (!empty($medicine_usage)): ?>
-                                    <?php foreach ($medicine_usage as $medicine): ?>
-                                    <p>• <?php echo htmlspecialchars($medicine['item_name']); ?>: <?php echo $medicine['total_used']; ?> units</p>
-                                    <?php endforeach; ?>
-                                    <div class="recommendation">
-                                        <strong>Prediction:</strong> Order more of these items soon
-                                    </div>
-                                <?php else: ?>
-                                    <p>No medicine usage data available</p>
-                                <?php endif; ?>
-                            </div>
-
-                            <!-- Stock Alerts -->
-                            <div class="insight-item">
-                                <h4>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                        <circle cx="12" cy="12" r="10"/>
-                                        <path d="M12 8v4M12 16h.01"/>
-                                    </svg>
-                                    Low Stock Items
-                                </h4>
-                                <?php if (!empty($low_stock_items)): ?>
-                                    <?php foreach (array_slice($low_stock_items, 0, 3) as $item): ?>
-                                    <p>• <?php echo htmlspecialchars($item['item_name']); ?>: <?php echo $item['quantity']; ?> units left</p>
-                                    <?php endforeach; ?>
-                                    <div class="recommendation">
-                                        <strong>Action:</strong> Reorder soon to avoid shortage
-                                    </div>
-                                <?php else: ?>
-                                    <p>All stock levels are healthy</p>
-                                    <div class="recommendation">
-                                        <strong>Status:</strong> No reorder needed
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Recent Visits -->
-                <div class="recent-section">
-                    <div class="section-header">
-                        <h2>Recent Visits</h2>
-                        <a href="visit-history.php" class="view-all">View All Visits</a>
-                    </div>
-                    <div class="table-wrapper">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Student</th>
-                                    <th>Complaint</th>
-                                    <th>Date</th>
-                                    <th>Time</th>
-                                    <th>Temperature</th>
-                                    <th>Attended By</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($recent_visits as $visit): ?>
-                                <tr>
-                                    <td>
-                                        <div class="patient-info">
-                                            <div class="patient-avatar">
-                                                <?php echo strtoupper(substr($visit['student_name'], 0, 2)); ?>
-                                            </div>
-                                            <div class="patient-details">
-                                                <span class="patient-name"><?php echo htmlspecialchars(substr($visit['student_name'], 0, 20)); ?></span>
-                                                <span class="patient-id">ID: #<?php echo htmlspecialchars($visit['student_id']); ?></span>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td><?php echo htmlspecialchars(substr($visit['complaint'], 0, 30)); ?></td>
-                                    <td><?php echo date('M d, Y', strtotime($visit['visit_date'])); ?></td>
-                                    <td><?php echo date('h:i A', strtotime($visit['visit_time'])); ?></td>
-                                    <td><?php echo $visit['temperature'] ? $visit['temperature'] . '°C' : 'N/A'; ?></td>
-                                    <td>
-                                        <div class="doctor-info">
-                                            <div class="doctor-avatar">
-                                                <?php echo $visit['doctor_name'] ? strtoupper(substr($visit['doctor_name'], 0, 2)) : 'N/A'; ?>
-                                            </div>
-                                            <span><?php echo $visit['doctor_name'] ? htmlspecialchars(explode(' ', $visit['doctor_name'])[0]) : 'N/A'; ?></span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <button class="action-btn-small" onclick="viewVisitDetails(<?php echo $visit['id']; ?>)">View</button>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                                <?php if (empty($recent_visits)): ?>
-                                <tr>
-                                    <td colspan="7" style="text-align: center; padding: 30px;">No recent visits found</td>
-                                </tr>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
                     </div>
                 </div>
 
@@ -1432,45 +1044,60 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="quick-actions">
                     <h2>Quick Actions</h2>
                     <div class="actions-grid">
-                        <a href="add-student.php" class="action-card">
+                        <a href="add_incident.php" class="action-card">
                             <div class="action-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <line x1="12" y1="8" x2="12" y2="16"/>
+                                    <line x1="8" y1="12" x2="16" y2="12"/>
+                                </svg>
+                            </div>
+                            <span>Report Incident</span>
+                        </a>
+                        <a href="clearance_request.php" class="action-card">
+                            <div class="action-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
+                                    <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999"/>
+                                </svg>
+                            </div>
+                            <span>New Clearance</span>
+                        </a>
+                        <a href="add_visit.php" class="action-card">
+                            <div class="action-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
                                     <circle cx="12" cy="8" r="4"/>
                                     <path d="M5.5 20V19C5.5 17.1435 6.2375 15.363 7.55025 14.0503C8.86301 12.7375 10.6435 12 12.5 12C14.3565 12 16.137 12.7375 17.4497 14.0503C18.7625 15.363 19.5 17.1435 19.5 19V20"/>
-                                    <path d="M20 4L22 6L20 8"/>
-                                    <path d="M22 4L20 6L22 8"/>
                                 </svg>
                             </div>
-                            <span>Add Student</span>
+                            <span>Log Visit</span>
                         </a>
-                        <a href="record-visit.php" class="action-card">
+                        <a href="stock_request.php" class="action-card">
                             <div class="action-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                    <circle cx="12" cy="12" r="10"/>
-                                    <path d="M12 6V12L16 14"/>
-                                    <path d="M8 2V6"/>
-                                    <path d="M16 2V6"/>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
+                                    <path d="M20 12V18C20 19.1046 19.1046 20 18 20H6C4.89543 20 4 19.1046 4 18V12"/>
+                                    <path d="M12 2V14M12 14L9 11M12 14L15 11"/>
                                 </svg>
                             </div>
-                            <span>Record Visit</span>
+                            <span>Request Stock</span>
                         </a>
-                        <a href="clearance-requests.php" class="action-card">
+                        <a href="physical_exam.php" class="action-card">
                             <div class="action-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
-                                    <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
+                                    <path d="M12 2L2 7L12 12L22 7L12 2Z"/>
+                                    <path d="M2 17L12 22L22 17"/>
+                                    <path d="M2 12L12 17L22 12"/>
                                 </svg>
                             </div>
-                            <span>Clearance</span>
+                            <span>Physical Exam</span>
                         </a>
-                        <a href="inventory.php" class="action-card">
+                        <a href="medical_certificate.php" class="action-card">
                             <div class="action-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                    <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
-                                    <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
+                                    <path d="M4 19.5C4 18.837 4.26339 18.2011 4.73223 17.7322C5.20107 17.2634 5.83696 17 6.5 17H20"/>
+                                    <path d="M6.5 2H20V22H6.5C5.83696 22 5.20107 21.7366 4.73223 21.2678C4.26339 20.7989 4 20.163 4 19.5V4.5C4 3.83696 4.26339 3.20107 4.73223 2.73223C5.20107 2.26339 5.83696 2 6.5 2V2Z"/>
                                 </svg>
                             </div>
-                            <span>Inventory</span>
+                            <span>Issue Certificate</span>
                         </a>
                     </div>
                 </div>
@@ -1479,91 +1106,6 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </div>
 
     <script>
-        // Initialize Chart
-        const ctx = document.getElementById('visitsChart').getContext('2d');
-        let visitsChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: <?php echo json_encode($days); ?>,
-                datasets: [{
-                    label: 'Number of Visits',
-                    data: <?php echo json_encode($counts); ?>,
-                    borderColor: '#191970',
-                    backgroundColor: 'rgba(25, 25, 112, 0.1)',
-                    borderWidth: 3,
-                    pointBackgroundColor: '#191970',
-                    pointBorderColor: '#fff',
-                    pointBorderWidth: 2,
-                    pointRadius: 6,
-                    pointHoverRadius: 8,
-                    tension: 0.4,
-                    fill: true
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        backgroundColor: '#191970',
-                        titleColor: '#fff',
-                        bodyColor: '#fff',
-                        padding: 10,
-                        cornerRadius: 8
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: {
-                            color: '#cfd8dc',
-                            drawBorder: false
-                        },
-                        ticks: {
-                            stepSize: 1,
-                            color: '#546e7a'
-                        }
-                    },
-                    x: {
-                        grid: {
-                            display: false
-                        },
-                        ticks: {
-                            color: '#546e7a'
-                        }
-                    }
-                }
-            }
-        });
-
-        // Update chart function
-        function updateChart(period) {
-            document.querySelectorAll('.period-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target.classList.add('active');
-            
-            // You could implement AJAX here to fetch different time periods
-            if (period === 'month') {
-                // Fetch monthly data via AJAX
-                fetch('get_chart_data.php?period=month')
-                    .then(response => response.json())
-                    .then(data => {
-                        visitsChart.data.labels = data.labels;
-                        visitsChart.data.datasets[0].data = data.values;
-                        visitsChart.update();
-                    });
-            }
-        }
-
-        // View visit details
-        function viewVisitDetails(visitId) {
-            window.location.href = 'visit-details.php?id=' + visitId;
-        }
-
         // Sidebar toggle sync
         const sidebar = document.querySelector('.sidebar');
         const mainContent = document.getElementById('mainContent');
@@ -1576,41 +1118,26 @@ $incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
             });
         }
 
+        // Chart animation
+        const chartBars = document.querySelectorAll('.chart-bar');
+        chartBars.forEach(bar => {
+            const originalHeight = bar.style.height;
+            bar.style.height = '0';
+            setTimeout(() => {
+                bar.style.height = originalHeight;
+            }, 200);
+        });
+
         // Auto-refresh data every 5 minutes
         setTimeout(() => {
             location.reload();
         }, 300000);
 
-        // Real-time notifications (simplified)
-        function checkForAlerts() {
-            <?php if ($stats['low_stock'] > 0): ?>
-            // Show notification for low stock
-            if (Notification.permission === 'granted') {
-                new Notification('Low Stock Alert', {
-                    body: '<?php echo $stats['low_stock']; ?> items are running low on stock',
-                    icon: '../assets/images/icon.png'
-                });
-            }
-            <?php endif; ?>
-            
-            <?php if ($stats['pending_clearance'] > 0): ?>
-            // Show notification for pending clearances
-            if (Notification.permission === 'granted') {
-                new Notification('Pending Clearances', {
-                    body: '<?php echo $stats['pending_clearance']; ?> clearance requests need review',
-                    icon: '../assets/images/icon.png'
-                });
-            }
-            <?php endif; ?>
+        // Update page title
+        const pageTitle = document.getElementById('pageTitle');
+        if (pageTitle) {
+            pageTitle.textContent = 'Dashboard';
         }
-
-        // Request notification permission
-        if (Notification.permission === 'default') {
-            Notification.requestPermission();
-        }
-
-        // Check for alerts on load
-        window.addEventListener('load', checkForAlerts);
     </script>
 </body>
 </html>
