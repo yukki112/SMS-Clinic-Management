@@ -36,10 +36,8 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">Dashboard</span>
-                            <span class="nav-badge">9</span>
                         </a>
                     </li>
-                 
                 </ul>
             </div>
 
@@ -57,7 +55,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">Students Medical Records</span>
-                            <span class="nav-count">284</span>
                         </a>
                     </li>
                     <li class="nav-item <?php echo $current_page == 'clinic_visits.php' ? 'active' : ''; ?>">
@@ -69,7 +66,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">Clinic Visits & Consultation</span>
-                            <span class="nav-count">47</span>
                         </a>
                     </li>
                     <li class="nav-item <?php echo $current_page == 'medicine_requests.php' ? 'active' : ''; ?>">
@@ -83,7 +79,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">Medicine & Supplies Inventory</span>
-                            <span class="nav-badge">12</span>
                         </a>
                     </li>
                 </ul>
@@ -104,7 +99,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">Incidents & Emergencies</span>
-                            <span class="nav-badge urgent">3</span>
                         </a>
                     </li>
                     <li class="nav-item <?php echo $current_page == 'health_programs.php' ? 'active' : ''; ?>">
@@ -127,7 +121,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">Health Clearance</span>
-                            <span class="nav-count">28</span>
                         </a>
                     </li>
                 </ul>
@@ -138,7 +131,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
                     <span>Administration</span>
                 </div>
                 <ul class="nav-menu">
-                   
                     <li class="nav-item <?php echo $current_page == 'reports.php' ? 'active' : ''; ?>">
                         <a href="reports.php" class="nav-link">
                             <div class="nav-icon-wrapper">
@@ -159,10 +151,8 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">User Management</span>
-                            <span class="nav-count">14</span>
                         </a>
                     </li>
-                  
                 </ul>
             </div>
         </div>
@@ -251,8 +241,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
 .sidebar.collapsed .logo-text,
 .sidebar.collapsed .nav-label,
 .sidebar.collapsed .nav-section-title span,
-.sidebar.collapsed .nav-badge,
-.sidebar.collapsed .nav-count,
 .sidebar.collapsed .upgrade-content {
     display: none;
 }
@@ -467,37 +455,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
     font-size: 0.9rem;
     font-weight: 500;
     transition: all 0.3s ease;
-}
-
-.nav-badge {
-    padding: 4px 8px;
-    background: #ffebee;
-    border-radius: 20px;
-    font-size: 0.65rem;
-    font-weight: 600;
-    color: #c62828;
-    border: 1px solid #ffcdd2;
-}
-
-.nav-badge.urgent {
-    background: #ffebee;
-    color: #c62828;
-    border-color: #ffcdd2;
-    animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
-}
-
-.nav-count {
-    padding: 2px 6px;
-    background: #eceff1;
-    border-radius: 8px;
-    font-size: 0.65rem;
-    font-weight: 600;
-    color: #191970;
 }
 
 .sidebar-footer {

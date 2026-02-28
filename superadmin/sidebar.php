@@ -70,7 +70,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">Reports</span>
-                            <span class="nav-count">12</span>
+                           
                         </a>
                     </li>
                     <li class="nav-item <?php echo $current_page == 'audit_logs.php' ? 'active' : ''; ?>">
@@ -115,7 +115,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">Role & Permission</span>
-                            <span class="nav-count">5</span>
+                            
                         </a>
                     </li>
                     <li class="nav-item <?php echo $current_page == 'system_config.php' ? 'active' : ''; ?>">
@@ -147,7 +147,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">All Users</span>
-                            <span class="nav-count">14</span>
+                            
                         </a>
                     </li>
                   
