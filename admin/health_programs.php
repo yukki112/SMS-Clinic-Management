@@ -1433,7 +1433,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                         
                         <form method="GET" action="" class="search-form">
                             <div class="form-group">
-                                <label for="student_id">Student ID / LRN</label>
+                                <label for="student_id">Student ID</label>
                                 <input type="text" class="form-control" id="student_id" name="student_id" 
                                        placeholder="Enter student ID" 
                                        value="<?php echo htmlspecialchars($student_id_search); ?>" required>

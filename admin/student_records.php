@@ -151,13 +151,39 @@ function getClinicVisits($db, $student_id) {
 // Function to fetch incident history
 function getIncidentHistory($db, $student_id) {
     try {
+        // First try to get from incident_history table
         $query = "SELECT * FROM incident_history 
                   WHERE student_id = :student_id 
                   ORDER BY incident_date DESC";
         $stmt = $db->prepare($query);
         $stmt->bindParam(':student_id', $student_id);
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $incidents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Also get from incidents table if it exists
+        try {
+            $query2 = "SELECT id, incident_date as incident_date, incident_type, description, action_taken, 
+                              created_by as reported_by 
+                       FROM incidents 
+                       WHERE student_id = :student_id 
+                       ORDER BY incident_date DESC";
+            $stmt2 = $db->prepare($query2);
+            $stmt2->bindParam(':student_id', $student_id);
+            $stmt2->execute();
+            $incidents2 = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Merge both arrays
+            $incidents = array_merge($incidents, $incidents2);
+            
+            // Sort by date
+            usort($incidents, function($a, $b) {
+                return strtotime($b['incident_date']) - strtotime($a['incident_date']);
+            });
+        } catch (PDOException $e) {
+            // incidents table might not exist, just return incident_history
+        }
+        
+        return $incidents;
     } catch (PDOException $e) {
         error_log("Error fetching incidents: " . $e->getMessage());
         return [];
@@ -167,13 +193,41 @@ function getIncidentHistory($db, $student_id) {
 // Function to fetch clearance history
 function getClearanceHistory($db, $student_id) {
     try {
+        // First try to get from clearance_history table
         $query = "SELECT * FROM clearance_history 
                   WHERE student_id = :student_id 
                   ORDER BY clearance_date DESC";
         $stmt = $db->prepare($query);
         $stmt->bindParam(':student_id', $student_id);
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $clearances = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Also get from clearance_requests table if it exists
+        try {
+            $query2 = "SELECT id, request_date as clearance_date, clearance_type, purpose, valid_until, 
+                              approved_by as issued_by 
+                       FROM clearance_requests 
+                       WHERE student_id = :student_id AND status = 'Approved'
+                       ORDER BY request_date DESC";
+            $stmt2 = $db->prepare($query2);
+            $stmt2->bindParam(':student_id', $student_id);
+            $stmt2->execute();
+            $clearances2 = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Merge both arrays
+            $clearances = array_merge($clearances, $clearances2);
+            
+            // Sort by date
+            usort($clearances, function($a, $b) {
+                $dateA = isset($a['clearance_date']) ? strtotime($a['clearance_date']) : 0;
+                $dateB = isset($b['clearance_date']) ? strtotime($b['clearance_date']) : 0;
+                return $dateB - $dateA;
+            });
+        } catch (PDOException $e) {
+            // clearance_requests table might not exist, just return clearance_history
+        }
+        
+        return $clearances;
     } catch (PDOException $e) {
         error_log("Error fetching clearances: " . $e->getMessage());
         return [];
@@ -210,6 +264,15 @@ if (!empty($student_id_search) && isset($_SESSION['verified_student_id']) && $_S
                     $student_data['clinic_visits'] = getClinicVisits($db, $student_id_search);
                     $student_data['incident_history'] = getIncidentHistory($db, $student_id_search);
                     $student_data['clearance_history'] = getClearanceHistory($db, $student_id_search);
+                    
+                    // Get user name for display
+                    $user_query = "SELECT full_name FROM users WHERE id = :user_id";
+                    $user_stmt = $db->prepare($user_query);
+                    $user_stmt->bindParam(':user_id', $_SESSION['user_id']);
+                    $user_stmt->execute();
+                    $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
+                    $student_data['current_user_name'] = $current_user ? $current_user['full_name'] : 'Staff';
+                    
                     break;
                 }
             }
@@ -234,6 +297,109 @@ if (!empty($student_id_search) && isset($_SESSION['verified_student_id']) && $_S
 // Clear verification if no student ID
 if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
     unset($_SESSION['verified_student_id']);
+}
+
+// Handle adding new records
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['add_visit']) && isset($_SESSION['verified_student_id'])) {
+        $student_id = $_SESSION['verified_student_id'];
+        $student_name = $_POST['student_name'];
+        $visit_date = $_POST['visit_date'];
+        $visit_time = $_POST['visit_time'];
+        $complaint = $_POST['complaint'];
+        $temperature = $_POST['temperature'] ?: null;
+        $blood_pressure = $_POST['blood_pressure'] ?: null;
+        $heart_rate = $_POST['heart_rate'] ?: null;
+        $treatment_given = $_POST['treatment_given'];
+        $disposition = $_POST['disposition'];
+        $notes = $_POST['notes'];
+        $attended_by = $_SESSION['user_id'];
+        
+        try {
+            $query = "INSERT INTO visit_history (student_id, visit_date, visit_time, complaint, temperature, 
+                                                blood_pressure, heart_rate, treatment_given, disposition, notes, attended_by) 
+                      VALUES (:student_id, :visit_date, :visit_time, :complaint, :temperature, 
+                              :blood_pressure, :heart_rate, :treatment_given, :disposition, :notes, :attended_by)";
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':student_id', $student_id);
+            $stmt->bindParam(':visit_date', $visit_date);
+            $stmt->bindParam(':visit_time', $visit_time);
+            $stmt->bindParam(':complaint', $complaint);
+            $stmt->bindParam(':temperature', $temperature);
+            $stmt->bindParam(':blood_pressure', $blood_pressure);
+            $stmt->bindParam(':heart_rate', $heart_rate);
+            $stmt->bindParam(':treatment_given', $treatment_given);
+            $stmt->bindParam(':disposition', $disposition);
+            $stmt->bindParam(':notes', $notes);
+            $stmt->bindParam(':attended_by', $attended_by);
+            $stmt->execute();
+            
+            $success_message = "Visit recorded successfully!";
+            
+            // Refresh data
+            $student_data['clinic_visits'] = getClinicVisits($db, $student_id);
+        } catch (PDOException $e) {
+            $error_message = "Error recording visit: " . $e->getMessage();
+        }
+    }
+    
+    if (isset($_POST['add_incident']) && isset($_SESSION['verified_student_id'])) {
+        $student_id = $_SESSION['verified_student_id'];
+        $incident_date = $_POST['incident_date'];
+        $incident_type = $_POST['incident_type'];
+        $description = $_POST['description'];
+        $action_taken = $_POST['action_taken'];
+        $reported_by = $_POST['reported_by'];
+        
+        try {
+            $query = "INSERT INTO incident_history (student_id, incident_date, incident_type, description, action_taken, reported_by) 
+                      VALUES (:student_id, :incident_date, :incident_type, :description, :action_taken, :reported_by)";
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':student_id', $student_id);
+            $stmt->bindParam(':incident_date', $incident_date);
+            $stmt->bindParam(':incident_type', $incident_type);
+            $stmt->bindParam(':description', $description);
+            $stmt->bindParam(':action_taken', $action_taken);
+            $stmt->bindParam(':reported_by', $reported_by);
+            $stmt->execute();
+            
+            $success_message = "Incident recorded successfully!";
+            
+            // Refresh data
+            $student_data['incident_history'] = getIncidentHistory($db, $student_id);
+        } catch (PDOException $e) {
+            $error_message = "Error recording incident: " . $e->getMessage();
+        }
+    }
+    
+    if (isset($_POST['add_clearance']) && isset($_SESSION['verified_student_id'])) {
+        $student_id = $_SESSION['verified_student_id'];
+        $clearance_date = $_POST['clearance_date'];
+        $clearance_type = $_POST['clearance_type'];
+        $purpose = $_POST['purpose'];
+        $valid_until = $_POST['valid_until'] ?: null;
+        $issued_by = $_POST['issued_by'];
+        
+        try {
+            $query = "INSERT INTO clearance_history (student_id, clearance_date, clearance_type, purpose, valid_until, issued_by) 
+                      VALUES (:student_id, :clearance_date, :clearance_type, :purpose, :valid_until, :issued_by)";
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':student_id', $student_id);
+            $stmt->bindParam(':clearance_date', $clearance_date);
+            $stmt->bindParam(':clearance_type', $clearance_type);
+            $stmt->bindParam(':purpose', $purpose);
+            $stmt->bindParam(':valid_until', $valid_until);
+            $stmt->bindParam(':issued_by', $issued_by);
+            $stmt->execute();
+            
+            $success_message = "Clearance issued successfully!";
+            
+            // Refresh data
+            $student_data['clearance_history'] = getClearanceHistory($db, $student_id);
+        } catch (PDOException $e) {
+            $error_message = "Error issuing clearance: " . $e->getMessage();
+        }
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -301,6 +467,46 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
             color: #546e7a;
             font-size: 1rem;
             font-weight: 400;
+        }
+
+        /* Alert Messages */
+        .alert {
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: slideDown 0.3s ease;
+        }
+
+        .alert-success {
+            background: #e8f5e9;
+            border: 1px solid #81c784;
+            color: #2e7d32;
+        }
+
+        .alert-error {
+            background: #ffebee;
+            border: 1px solid #ef5350;
+            color: #c62828;
+        }
+
+        .alert svg {
+            width: 24px;
+            height: 24px;
+            flex-shrink: 0;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* Search Section */
@@ -511,6 +717,11 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
             border-radius: 20px;
             font-size: 0.8rem;
             font-weight: 600;
+        }
+
+        .badge-expired {
+            background: #ffebee;
+            color: #c62828;
         }
 
         .info-grid {
@@ -937,6 +1148,28 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
             color: white;
         }
 
+        /* Form Modal */
+        .form-modal {
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+
+        .form-grid .full-width {
+            grid-column: span 2;
+        }
+
+        textarea.form-control {
+            resize: vertical;
+            min-height: 100px;
+        }
+
         @keyframes fadeInUp {
             from {
                 opacity: 0;
@@ -994,6 +1227,14 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                 flex: 1;
                 text-align: center;
                 padding: 12px;
+            }
+            
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .form-grid .full-width {
+                grid-column: span 1;
             }
         }
     </style>
@@ -1062,7 +1303,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                     <div class="search-title">🔍 Search Student Record</div>
                     <form method="GET" action="" class="search-form">
                         <div class="form-group">
-                            <label for="student_id">Student ID / LRN</label>
+                            <label for="student_id">Student ID</label>
                             <input type="text" class="form-control" id="student_id" name="student_id" 
                                    placeholder="Enter student ID (e.g., 2024-0001)" 
                                    value="<?php echo htmlspecialchars($student_id_search); ?>" required>
@@ -1089,6 +1330,28 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                 </div>
 
                 <?php if ($student_data): ?>
+                <!-- Success/Error Messages -->
+                <?php if (isset($success_message)): ?>
+                    <div class="alert alert-success">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999"/>
+                            <path d="M22 4L12 14.01L9 11.01"/>
+                        </svg>
+                        <?php echo $success_message; ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (isset($error_message)): ?>
+                    <div class="alert alert-error">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <?php echo $error_message; ?>
+                    </div>
+                <?php endif; ?>
+
                 <!-- Student Profile -->
                 <div class="student-profile">
                     <div class="profile-header">
@@ -1108,11 +1371,18 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                         <div class="info-item">
                             <div class="info-label">Grade & Section</div>
                             <div class="info-value">
-                                Grade <?php echo htmlspecialchars($student_data['year_level'] ?? 'N/A'); ?> - 
-                                <?php echo htmlspecialchars($student_data['section'] ?? 'N/A'); ?>
-                                <?php if (!empty($student_data['semester'])): ?>
-                                    (<?php echo htmlspecialchars($student_data['semester']); ?>)
-                                <?php endif; ?>
+                                <?php 
+                                $year = $student_data['year_level'] ?? '';
+                                $section = $student_data['section'] ?? '';
+                                $semester = $student_data['semester'] ?? '';
+                                
+                                if ($year && $section) {
+                                    echo "Grade $year - $section";
+                                    if ($semester) echo " ($semester)";
+                                } else {
+                                    echo 'N/A';
+                                }
+                                ?>
                             </div>
                         </div>
 
@@ -1208,7 +1478,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                         <div class="tab-pane active" id="visits">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                                 <h3 style="color: #191970;">Clinic Visit History</h3>
-                                <button class="action-btn" onclick="window.location.href='add-visit.php?student_id=<?php echo $student_data['student_id']; ?>'">
+                                <button class="action-btn" onclick="showVisitForm()">
                                     + Log New Visit
                                 </button>
                             </div>
@@ -1284,7 +1554,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                         <div class="tab-pane" id="incidents">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                                 <h3 style="color: #191970;">Incident History</h3>
-                                <button class="action-btn" onclick="window.location.href='add-incident.php?student_id=<?php echo $student_data['student_id']; ?>'">
+                                <button class="action-btn" onclick="showIncidentForm()">
                                     + Log Incident
                                 </button>
                             </div>
@@ -1333,7 +1603,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                         <div class="tab-pane" id="clearance">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                                 <h3 style="color: #191970;">Medical Clearance History</h3>
-                                <button class="action-btn" onclick="window.location.href='add-clearance.php?student_id=<?php echo $student_data['student_id']; ?>'">
+                                <button class="action-btn" onclick="showClearanceForm()">
                                     + Issue Clearance
                                 </button>
                             </div>
@@ -1362,7 +1632,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                                             </td>
                                             <td><?php echo htmlspecialchars($clearance['purpose']); ?></td>
                                             <td>
-                                                <?php if ($clearance['valid_until']): ?>
+                                                <?php if (!empty($clearance['valid_until'])): ?>
                                                     <?php echo date('M d, Y', strtotime($clearance['valid_until'])); ?>
                                                 <?php else: ?>
                                                     <small>No expiry</small>
@@ -1370,15 +1640,15 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                                             </td>
                                             <td>
                                                 <?php 
-                                                $is_valid = strtotime($clearance['valid_until']) > time();
-                                                $status_class = $is_valid ? 'disposition-sent-home' : 'disposition-cancelled';
+                                                $is_valid = !empty($clearance['valid_until']) && strtotime($clearance['valid_until']) > time();
+                                                $status_class = $is_valid ? 'badge' : 'badge badge-expired';
                                                 $status_text = $is_valid ? 'Valid' : 'Expired';
                                                 ?>
-                                                <span class="badge <?php echo $status_class; ?>">
+                                                <span class="<?php echo $status_class; ?>">
                                                     <?php echo $status_text; ?>
                                                 </span>
                                             </td>
-                                            <td><small><?php echo htmlspecialchars($clearance['issued_by']); ?></small></td>
+                                            <td><small><?php echo htmlspecialchars($clearance['issued_by'] ?? 'N/A'); ?></small></td>
                                         </tr>
                                         <?php endforeach; ?>
                                     </tbody>
@@ -1400,8 +1670,8 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                         <div class="tab-pane" id="add">
                             <h3 style="color: #191970; margin-bottom: 20px;">Quick Actions</h3>
                             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
-                                <a href="add-visit.php?student_id=<?php echo $student_data['student_id']; ?>" style="text-decoration: none;">
-                                    <div style="padding: 30px; background: #eceff1; border-radius: 12px; text-align: center; border: 1px solid #cfd8dc; transition: all 0.3s ease;">
+                                <a href="#" onclick="showVisitForm(); return false;" style="text-decoration: none;">
+                                    <div style="padding: 30px; background: #eceff1; border-radius: 12px; text-align: center; border: 1px solid #cfd8dc; transition: all 0.3s ease; cursor: pointer;">
                                         <div style="width: 60px; height: 60px; background: #191970; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; color: white;">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
                                                 <circle cx="12" cy="12" r="10"/>
@@ -1413,8 +1683,8 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                                     </div>
                                 </a>
 
-                                <a href="add-incident.php?student_id=<?php echo $student_data['student_id']; ?>" style="text-decoration: none;">
-                                    <div style="padding: 30px; background: #eceff1; border-radius: 12px; text-align: center; border: 1px solid #cfd8dc; transition: all 0.3s ease;">
+                                <a href="#" onclick="showIncidentForm(); return false;" style="text-decoration: none;">
+                                    <div style="padding: 30px; background: #eceff1; border-radius: 12px; text-align: center; border: 1px solid #cfd8dc; transition: all 0.3s ease; cursor: pointer;">
                                         <div style="width: 60px; height: 60px; background: #191970; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; color: white;">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
                                                 <circle cx="12" cy="12" r="10"/>
@@ -1427,8 +1697,8 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
                                     </div>
                                 </a>
 
-                                <a href="add-clearance.php?student_id=<?php echo $student_data['student_id']; ?>" style="text-decoration: none;">
-                                    <div style="padding: 30px; background: #eceff1; border-radius: 12px; text-align: center; border: 1px solid #cfd8dc; transition: all 0.3s ease;">
+                                <a href="#" onclick="showClearanceForm(); return false;" style="text-decoration: none;">
+                                    <div style="padding: 30px; background: #eceff1; border-radius: 12px; text-align: center; border: 1px solid #cfd8dc; transition: all 0.3s ease; cursor: pointer;">
                                         <div style="width: 60px; height: 60px; background: #191970; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; color: white;">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
                                                 <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999"/>
@@ -1492,23 +1762,200 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
             </p>
         </div>
     </div>
-    
-    <script>
-        // Prevent background scrolling when modal is open
-        document.body.style.overflow = 'hidden';
-        
-        function cancelAccess() {
-            window.location.href = window.location.pathname; // Redirect to same page without query string
-        }
-        
-        // Close modal when clicking outside (optional)
-        document.getElementById('verificationModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                cancelAccess();
-            }
-        });
-    </script>
     <?php endif; ?>
+
+    <!-- Add Visit Modal -->
+    <div class="modal-overlay" id="visitModal" style="display: none;">
+        <div class="modal-container form-modal">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 6V12L16 14"/>
+                </svg>
+            </div>
+            <h2 class="modal-title">Log Clinic Visit</h2>
+            <p class="modal-subtitle">Record a new clinic visit for <?php echo htmlspecialchars($student_data['full_name'] ?? ''); ?></p>
+            
+            <form method="POST" action="" class="modal-form">
+                <input type="hidden" name="student_name" value="<?php echo htmlspecialchars($student_data['full_name'] ?? ''); ?>">
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="visit_date">Visit Date</label>
+                        <input type="date" class="form-control" id="visit_date" name="visit_date" 
+                               value="<?php echo date('Y-m-d'); ?>" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="visit_time">Visit Time</label>
+                        <input type="time" class="form-control" id="visit_time" name="visit_time" 
+                               value="<?php echo date('H:i'); ?>" required>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="complaint">Chief Complaint</label>
+                        <textarea class="form-control" id="complaint" name="complaint" rows="2" required></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="temperature">Temperature (°C)</label>
+                        <input type="number" step="0.1" class="form-control" id="temperature" name="temperature" 
+                               placeholder="36.5">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="blood_pressure">Blood Pressure</label>
+                        <input type="text" class="form-control" id="blood_pressure" name="blood_pressure" 
+                               placeholder="120/80">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="heart_rate">Heart Rate (bpm)</label>
+                        <input type="number" class="form-control" id="heart_rate" name="heart_rate" 
+                               placeholder="75">
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="treatment_given">Treatment Given</label>
+                        <textarea class="form-control" id="treatment_given" name="treatment_given" rows="2"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="disposition">Disposition</label>
+                        <select class="form-control" id="disposition" name="disposition" required>
+                            <option value="Sent Home">Sent Home</option>
+                            <option value="Referred">Referred</option>
+                            <option value="Admitted">Admitted</option>
+                            <option value="Cleared">Cleared</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="notes">Additional Notes</label>
+                        <input type="text" class="form-control" id="notes" name="notes" placeholder="Optional notes">
+                    </div>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn secondary" onclick="hideVisitForm()">Cancel</button>
+                    <button type="submit" name="add_visit" class="modal-btn primary">Save Visit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Incident Modal -->
+    <div class="modal-overlay" id="incidentModal" style="display: none;">
+        <div class="modal-container form-modal">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+            </div>
+            <h2 class="modal-title">Report Incident</h2>
+            <p class="modal-subtitle">Log an incident or injury for <?php echo htmlspecialchars($student_data['full_name'] ?? ''); ?></p>
+            
+            <form method="POST" action="" class="modal-form">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="incident_date">Incident Date</label>
+                        <input type="date" class="form-control" id="incident_date" name="incident_date" 
+                               value="<?php echo date('Y-m-d'); ?>" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="incident_type">Incident Type</label>
+                        <select class="form-control" id="incident_type" name="incident_type" required>
+                            <option value="Incident">Incident</option>
+                            <option value="Minor Injury">Minor Injury</option>
+                            <option value="Emergency">Emergency</option>
+                            <option value="Accident">Accident</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="description">Incident Description</label>
+                        <textarea class="form-control" id="description" name="description" rows="3" required></textarea>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="action_taken">Action Taken</label>
+                        <textarea class="form-control" id="action_taken" name="action_taken" rows="2"></textarea>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="reported_by">Reported By</label>
+                        <input type="text" class="form-control" id="reported_by" name="reported_by" 
+                               value="<?php echo htmlspecialchars($student_data['current_user_name'] ?? ''); ?>" required>
+                    </div>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn secondary" onclick="hideIncidentForm()">Cancel</button>
+                    <button type="submit" name="add_incident" class="modal-btn primary">Report Incident</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Clearance Modal -->
+    <div class="modal-overlay" id="clearanceModal" style="display: none;">
+        <div class="modal-container form-modal">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999"/>
+                    <path d="M22 4L12 14.01L9 11.01"/>
+                </svg>
+            </div>
+            <h2 class="modal-title">Issue Medical Clearance</h2>
+            <p class="modal-subtitle">Issue clearance for <?php echo htmlspecialchars($student_data['full_name'] ?? ''); ?></p>
+            
+            <form method="POST" action="" class="modal-form">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="clearance_date">Issuance Date</label>
+                        <input type="date" class="form-control" id="clearance_date" name="clearance_date" 
+                               value="<?php echo date('Y-m-d'); ?>" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="clearance_type">Clearance Type</label>
+                        <select class="form-control" id="clearance_type" name="clearance_type" required>
+                            <option value="Sports">Sports</option>
+                            <option value="Event">Event</option>
+                            <option value="Work Immersion">Work Immersion</option>
+                            <option value="After Illness">After Illness</option>
+                            <option value="After Hospitalization">After Hospitalization</option>
+                            <option value="General">General</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="purpose">Purpose</label>
+                        <textarea class="form-control" id="purpose" name="purpose" rows="2" required></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="valid_until">Valid Until</label>
+                        <input type="date" class="form-control" id="valid_until" name="valid_until">
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="issued_by">Issued By</label>
+                        <input type="text" class="form-control" id="issued_by" name="issued_by" 
+                               value="<?php echo htmlspecialchars($student_data['current_user_name'] ?? ''); ?>" required>
+                    </div>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn secondary" onclick="hideClearanceForm()">Cancel</button>
+                    <button type="submit" name="add_clearance" class="modal-btn primary">Issue Clearance</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <script>
         // Sidebar toggle sync
@@ -1540,11 +1987,81 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
             event.target.classList.add('active');
         }
 
+        // Modal functions
+        function showVisitForm() {
+            document.getElementById('visitModal').style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function hideVisitForm() {
+            document.getElementById('visitModal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        function showIncidentForm() {
+            document.getElementById('incidentModal').style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function hideIncidentForm() {
+            document.getElementById('incidentModal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        function showClearanceForm() {
+            document.getElementById('clearanceModal').style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function hideClearanceForm() {
+            document.getElementById('clearanceModal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        function cancelAccess() {
+            window.location.href = window.location.pathname;
+        }
+
+        // Close modals when clicking outside
+        window.onclick = function(event) {
+            const visitModal = document.getElementById('visitModal');
+            const incidentModal = document.getElementById('incidentModal');
+            const clearanceModal = document.getElementById('clearanceModal');
+            const verificationModal = document.getElementById('verificationModal');
+            
+            if (event.target === visitModal) {
+                hideVisitForm();
+            }
+            if (event.target === incidentModal) {
+                hideIncidentForm();
+            }
+            if (event.target === clearanceModal) {
+                hideClearanceForm();
+            }
+            if (event.target === verificationModal) {
+                cancelAccess();
+            }
+        }
+
+        // Prevent background scrolling when modal is open
+        <?php if ($show_verification_modal): ?>
+        document.body.style.overflow = 'hidden';
+        <?php endif; ?>
+
         // Update page title
         const pageTitle = document.getElementById('pageTitle');
         if (pageTitle) {
             pageTitle.textContent = 'Student Medical Records';
         }
+
+        // Auto-hide alerts after 5 seconds
+        setTimeout(() => {
+            document.querySelectorAll('.alert').forEach(alert => {
+                alert.style.opacity = '0';
+                alert.style.transition = 'opacity 0.5s ease';
+                setTimeout(() => alert.remove(), 500);
+            });
+        }, 5000);
     </script>
 </body>
 </html>
