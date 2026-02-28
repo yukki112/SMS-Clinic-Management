@@ -3,666 +3,645 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ICARE · clinic for the collegiate</title>
-  <!-- Font Awesome 6 (free, premium feel icons) -->
+  <title>ICARE · academic health hub</title>
+  <!-- strict color palette: #191970 (midnight) + #ECEFF1 (blue grey 50) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <!-- Font Awesome 6 (free) – premium sharp icons, no emoji -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <style>
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
-      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
 
     body {
-      background-color: #ECEFF1;      /* soft blue‑grey */
-      color: #191970;                 /* midnight navy */
-      line-height: 1.4;
+      font-family: 'Inter', sans-serif;
+      background-color: #ECEFF1;      /* soft background */
+      color: #191970;                 /* deep midnight text */
+      line-height: 1.5;
+      scroll-behavior: smooth;
       overflow-x: hidden;
     }
 
-    /* smooth animated gradient overlay — subtle movement */
-    @keyframes softFlow {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
+    /* container */
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 2rem;
     }
 
-    .dynamic-bg {
+    /* premium smooth elements */
+    h1, h2, h3 {
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    /* buttons – only two colors + transparency */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 2rem;
+      border-radius: 40px;
+      font-weight: 500;
+      font-size: 1rem;
+      text-decoration: none;
+      transition: all 0.25s ease;
+      border: 1.5px solid transparent;
+      cursor: pointer;
+      background: transparent;
+    }
+
+    .btn-primary {
+      background: #191970;
+      color: #ECEFF1;
+      box-shadow: 0 8px 20px rgba(25, 25, 112, 0.2);
+    }
+    .btn-primary:hover {
+      background: #2a2a9c;
+      transform: translateY(-3px);
+      box-shadow: 0 15px 30px rgba(25, 25, 112, 0.3);
+    }
+
+    .btn-outline {
+      border-color: #191970;
+      color: #191970;
+      background: transparent;
+    }
+    .btn-outline:hover {
+      background: rgba(25, 25, 112, 0.04);
+      border-color: #191970;
+      transform: translateY(-2px);
+    }
+
+    /* navbar */
+    .navbar {
+      padding: 1.25rem 0;
       position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: radial-gradient(circle at 30% 40%, rgba(25,25,112,0.02) 0%, transparent 30%),
-                  radial-gradient(circle at 80% 70%, rgba(25,25,112,0.03) 0%, transparent 35%),
-                  linear-gradient(125deg, #ECEFF1, #dbe3e9, #ECEFF1);
-      background-size: 200% 200%;
-      animation: softFlow 22s ease infinite;
-      z-index: -2;
-      pointer-events: none;
-    }
-
-    /* floating geometric accents (only two colours) */
-    .floating-shape {
-      position: fixed;
-      background: rgba(25,25,112,0.04);
-      border-radius: 64% 36% 41% 59% / 40% 43% 57% 60%;
-      z-index: -1;
-      filter: blur(18px);
-    }
-    .shape1 {
-      width: 35vmax; height: 35vmax;
-      top: -10vh; right: -5vw;
-      background: #19197008;
-      animation: float 28s infinite alternate ease-in-out;
-    }
-    .shape2 {
-      width: 45vmin; height: 45vmin;
-      bottom: 5vh; left: -3vw;
-      background: #1919700c;
-      border-radius: 73% 27% 58% 42% / 45% 47% 53% 55%;
-      animation: float 20s infinite alternate-reverse;
-    }
-    @keyframes float {
-      0% { transform: translate(0, 0) rotate(0deg); }
-      100% { transform: translate(3%, 6%) rotate(8deg); }
-    }
-
-    /* main container — full viewport with overflow */
-    .landscape {
-      min-height: 100vh;
       width: 100%;
-      display: flex;
-      flex-direction: column;
-      backdrop-filter: blur(0); /* crisp text */
+      top: 0;
+      z-index: 100;
+      background: rgba(236, 239, 241, 0.75); /* #ECEFF1 with transparency */
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(25, 25, 112, 0.1);
     }
 
-    /* header with logo & nav (no register) */
-    .top-bar {
+    .nav-container {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 1.4rem 5%;
-      background: rgba(236, 239, 241, 0.55);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border-bottom: 1px solid rgba(25,25,112,0.08);
-      flex-wrap: wrap;
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 2rem;
     }
 
-    .logo-area {
+    /* logo + wordmark */
+    .logo-wrapper {
       display: flex;
       align-items: center;
-      gap: 0.8rem;
+      gap: 0.75rem;
     }
     .logo-img {
-      width: 52px;
-      height: 52px;
+      width: 44px;
+      height: 44px;
       object-fit: contain;
-      filter: drop-shadow(0 4px 8px rgba(25,25,112,0.15));
+      filter: drop-shadow(0 2px 4px rgba(25,25,112,0.2));
     }
-    .clinic-name {
-      font-size: 2rem;
-      font-weight: 600;
-      letter-spacing: -0.5px;
+    .logo-text {
+      font-size: 1.6rem;
+      font-weight: 700;
       color: #191970;
-      line-height: 1;
+      letter-spacing: -0.02em;
     }
-    .clinic-name span {
+    .logo-text span {
       font-weight: 300;
-      font-size: 1rem;
-      letter-spacing: 2px;
-      display: block;
-      margin-top: 4px;
-      color: #191970cc;
+      color: #191970;
+      opacity: 0.9;
     }
 
     .nav-links {
       display: flex;
-      gap: 2.2rem;
       align-items: center;
+      gap: 2.5rem;
+      list-style: none;
     }
     .nav-links a {
       text-decoration: none;
       color: #191970;
-      font-weight: 450;
-      font-size: 1.1rem;
-      padding: 0.3rem 0.2rem;
-      border-bottom: 2px solid transparent;
-      transition: 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .nav-links a i {
-      font-size: 1.2rem;
-      color: #191970dd;
+      font-weight: 500;
+      font-size: 1rem;
+      transition: opacity 0.2s;
+      opacity: 0.8;
     }
     .nav-links a:hover {
-      border-bottom-color: #191970;
-      opacity: 0.9;
+      opacity: 1;
     }
 
-    /* main grid — 1 out of 1 bespoke layout */
-    .hero-grid {
-      flex: 1;
+    /* remove register – only login */
+    .nav-links .btn-outline {
+      padding: 0.5rem 1.8rem;
+      margin-left: 0.5rem;
+    }
+
+    /* hero */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      padding: 7rem 0 4rem;
+      background: #ECEFF1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero .container {
       display: grid;
-      grid-template-columns: 1.2fr 0.9fr;
-      gap: 2rem;
-      padding: 3% 5% 4% 5%;
+      grid-template-columns: 1.1fr 0.9fr;
       align-items: center;
+      gap: 3rem;
     }
 
-    /* left side: dynamic text + info cubes */
-    .hero-text {
-      max-width: 100%;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: #1919700c;
-      padding: 0.5rem 1.3rem 0.5rem 1rem;
-      border-radius: 60px;
-      font-size: 0.95rem;
-      font-weight: 500;
+    .hero h1 {
+      font-size: 3.5rem;
+      line-height: 1.2;
+      margin-bottom: 1.5rem;
       color: #191970;
-      border: 1px solid #1919701a;
-      margin-bottom: 2rem;
+    }
+
+    .hero-accent {
+      background: rgba(25, 25, 112, 0.05);
+      padding: 0.2rem 1rem;
+      border-radius: 60px;
+      display: inline-block;
+      margin-bottom: 1.5rem;
+      font-weight: 500;
+      border: 1px solid rgba(25, 25, 112, 0.2);
       backdrop-filter: blur(4px);
     }
-    .badge i {
-      font-size: 1.2rem;
-    }
 
-    .main-headline {
-      font-size: 3.8rem;
-      font-weight: 700;
-      line-height: 1.1;
-      letter-spacing: -1.5px;
-      color: #191970;
-      margin-bottom: 1.5rem;
-    }
-    .main-headline i {
-      color: #191970;
-      font-size: 3rem;
-      margin-right: 0.2rem;
-      opacity: 0.7;
-    }
-
-    .headline-desc {
+    .hero p {
       font-size: 1.2rem;
-      color: #191970dd;
-      max-width: 550px;
       margin-bottom: 2.5rem;
-      font-weight: 350;
-      border-left: 4px solid #191970;
-      padding-left: 1.4rem;
+      color: #191970;
+      opacity: 0.8;
+      max-width: 90%;
     }
 
-    /* stats / quick facts — premium cards */
-    .stat-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1.2rem;
-      margin-bottom: 3rem;
+    .hero-buttons {
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
     }
-    .stat-item {
-      background: rgba(236, 239, 241, 0.7);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      padding: 1.3rem 0.8rem;
+
+    /* floating elements (animation) */
+    .floating-shape {
+      position: absolute;
+      width: 320px;
+      height: 320px;
+      border-radius: 64px;
+      background: rgba(25, 25, 112, 0.03);
+      bottom: -80px;
+      right: -40px;
+      transform: rotate(25deg);
+      z-index: 0;
+      border: 2px dashed rgba(25, 25, 112, 0.15);
+      animation: float 18s infinite ease-in-out;
+    }
+
+    .floating-shape-two {
+      width: 200px;
+      height: 200px;
+      background: rgba(25, 25, 112, 0.02);
+      position: absolute;
+      top: 20%;
+      left: -60px;
+      border-radius: 50%;
+      border: 2px dotted rgba(25, 25, 112, 0.2);
+      animation: float-reverse 22s infinite alternate;
+    }
+
+    @keyframes float {
+      0% { transform: rotate(25deg) translateY(0) translateX(0); }
+      50% { transform: rotate(30deg) translateY(-20px) translateX(15px); }
+      100% { transform: rotate(25deg) translateY(0) translateX(0); }
+    }
+    @keyframes float-reverse {
+      0% { transform: translateY(0) rotate(0deg); }
+      100% { transform: translateY(-40px) rotate(10deg); }
+    }
+
+    /* right side visual — abstract health + logo presence */
+    .hero-visual {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .icon-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.8rem;
+      position: relative;
+      z-index: 5;
+    }
+
+    .icon-card {
+      background: white;
+      width: 120px;
+      height: 120px;
       border-radius: 32px;
-      border: 1px solid rgba(25,25,112,0.15);
-      box-shadow: 0 20px 30px -12px rgba(25,25,112,0.1);
-      transition: transform 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      box-shadow: 0 20px 35px -8px rgba(25, 25, 112, 0.2);
+      backdrop-filter: blur(4px);
+      background: rgba(255, 255, 255, 0.75);
+      border: 1px solid rgba(25, 25, 112, 0.15);
+      transition: all 0.25s;
+    }
+    .icon-card i {
+      font-size: 2.8rem;
+      color: #191970;
+    }
+    .icon-card span {
+      font-weight: 500;
+      color: #191970;
+    }
+    .icon-card:hover {
+      transform: scale(1.05) translateY(-6px);
+      background: white;
+    }
+
+    /* features section */
+    .section {
+      padding: 6rem 0;
+      background: #ECEFF1;
+    }
+
+    .section-title {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+      color: #191970;
       text-align: center;
     }
-    .stat-item:hover {
-      transform: translateY(-5px);
-      background: rgba(236, 239, 241, 0.9);
-      border-color: #19197040;
+
+    .section-subhead {
+      text-align: center;
+      font-size: 1.2rem;
+      max-width: 700px;
+      margin: 0 auto 4rem;
+      opacity: 0.75;
     }
-    .stat-icon {
-      font-size: 2rem;
-      margin-bottom: 0.4rem;
-      color: #191970;
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 2.5rem;
+    }
+
+    .feature-item {
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(10px);
+      border-radius: 48px;
+      padding: 2.5rem 2rem;
+      border: 1px solid rgba(25, 25, 112, 0.15);
+      transition: 0.2s;
+      box-shadow: 0 15px 30px -12px rgba(25, 25, 112, 0.1);
+    }
+    .feature-item:hover {
+      background: white;
+      border-color: #191970;
+    }
+
+    .feature-icon-lg {
+      width: 70px;
+      height: 70px;
+      background: #191970;
+      border-radius: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 2rem;
+    }
+    .feature-icon-lg i {
+      font-size: 2.5rem;
+      color: #ECEFF1;
+    }
+
+    .feature-item h3 {
+      font-size: 1.7rem;
+      margin-bottom: 1rem;
+    }
+    .feature-item p {
+      opacity: 0.75;
+      font-weight: 400;
+    }
+
+    /* about + stats */
+    .about-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: center;
+      gap: 4rem;
+    }
+
+    .about-text h2 {
+      font-size: 2.8rem;
+      line-height: 1.2;
+      margin-bottom: 1.5rem;
+    }
+    .about-text p {
+      font-size: 1.15rem;
+      opacity: 0.8;
+      margin-bottom: 2rem;
+    }
+
+    .stat-cards {
+      display: flex;
+      gap: 2rem;
+      margin-top: 2.5rem;
+    }
+    .stat-item {
+      background: white;
+      padding: 1.5rem 2rem;
+      border-radius: 40px;
+      text-align: center;
+      min-width: 130px;
+      border: 1px solid #19197020;
     }
     .stat-number {
-      font-size: 1.8rem;
+      font-size: 2.5rem;
       font-weight: 700;
-      line-height: 1.2;
       color: #191970;
     }
     .stat-label {
-      font-size: 0.85rem;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      font-weight: 400;
-      color: #191970cc;
+      font-size: 1rem;
+      opacity: 0.7;
     }
 
-    /* feature mini-list */
-    .feature-list {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
+    .about-visual {
+      background: rgba(25, 25, 112, 0.03);
+      border-radius: 100px 40px 100px 40px;
+      padding: 2.5rem;
+      border: 1px dashed #19197050;
     }
-    .feature-row {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
+    .about-visual i {
+      font-size: 4rem;
+      color: #191970;
+      margin: 1rem;
     }
-    .feature-row i {
-      width: 2rem;
-      height: 2rem;
-      background: #19197012;
-      border-radius: 50%;
-      display: inline-flex;
-      align-items: center;
+
+    /* contact */
+    .contact-cards {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2rem;
       justify-content: center;
-      color: #191970;
-      font-size: 1.1rem;
+      margin-top: 2rem;
     }
-    .feature-row span {
-      font-size: 1.05rem;
-      font-weight: 430;
+    .contact-card {
+      background: white;
+      padding: 2rem 2.5rem;
+      border-radius: 60px;
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex: 1 1 260px;
+      border: 1px solid rgba(25,25,112,0.2);
+      box-shadow: 0 4px 14px rgba(25,25,112,0.05);
+    }
+    .contact-card i {
+      font-size: 2.2rem;
       color: #191970;
+    }
+    .contact-card span {
+      font-weight: 600;
+      font-size: 1.2rem;
     }
 
-    /* right side — visual cards & activity feed */
-    .right-panel {
+    /* footer */
+    .footer {
+      padding: 2.5rem 0;
+      border-top: 1px solid rgba(25,25,112,0.15);
+      background: #ECEFF1;
+    }
+    .footer .container {
       display: flex;
-      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .footer small {
+      opacity: 0.6;
+      font-weight: 400;
+    }
+    .footer-links {
+      display: flex;
       gap: 2rem;
     }
-
-    /* main card — after illness / clearance summary */
-    .glass-panel {
-      background: rgba(236, 239, 241, 0.6);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border-radius: 42px;
-      padding: 2rem 1.8rem;
-      border: 1px solid #1919701a;
-      box-shadow: 0 35px 60px -25px rgba(25,25,112,0.25);
-    }
-
-    .card-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 1.4rem;
-      font-weight: 600;
-      margin-bottom: 1.5rem;
+    .footer-links a {
       color: #191970;
-    }
-    .card-title i {
-      font-size: 1.8rem;
+      text-decoration: none;
+      opacity: 0.7;
+      font-weight: 500;
     }
 
-    .clearance-feed {
-      display: flex;
-      flex-direction: column;
-      gap: 1.2rem;
+    /* responsive touches */
+    @media (max-width: 800px) {
+      .hero .container {
+        grid-template-columns: 1fr;
+        text-align: center;
+      }
+      .hero p { max-width: 100%; }
+      .hero-buttons { justify-content: center; }
+      .about-grid { grid-template-columns: 1fr; }
+      .nav-links { gap: 1rem; }
     }
-    .feed-entry {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px dashed #19197020;
-      padding-bottom: 0.8rem;
+    @media (max-width: 600px) {
+      .nav-container { flex-direction: column; gap: 0.8rem; }
+      .logo-text { font-size: 1.4rem; }
     }
-    .entry-left {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .entry-icon {
-      width: 42px; height: 42px;
+
+    /* utility */
+    .text-midnight { color: #191970; }
+    .bg-midnight { background: #191970; color: #ECEFF1; }
+    .pill-badge {
       background: #19197010;
-      border-radius: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.3rem;
-      color: #191970;
+      border-radius: 100px;
+      padding: 0.4rem 1rem;
+      font-weight: 500;
     }
-    .entry-info h4 {
-      font-size: 1rem;
-      font-weight: 600;
-      margin-bottom: 2px;
-    }
-    .entry-info p {
-      font-size: 0.85rem;
-      color: #191970bb;
-    }
-    .entry-status {
-      background: #19197010;
-      padding: 0.3rem 1rem;
-      border-radius: 40px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      border: 1px solid #19197030;
-    }
-    .status-approve {
-      background: #19197020;
-      border-color: #191970;
-      color: #191970;
-    }
-
-    /* second card: today’s visits & dispensing */
-    .split-card {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.2rem;
-    }
-    .mini-card {
-      background: rgba(236,239,241,0.5);
-      backdrop-filter: blur(8px);
-      border-radius: 28px;
-      padding: 1.5rem 1.2rem;
-      border: 1px solid #1919701a;
-    }
-    .mini-card i {
-      font-size: 1.8rem;
-      margin-bottom: 0.7rem;
-      color: #191970;
-    }
-    .mini-card h3 {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #191970;
-    }
-    .mini-card p {
-      color: #191970dd;
-      font-size: 0.9rem;
-    }
-    .micro-list {
-      margin-top: 1rem;
-      list-style: none;
-    }
-    .micro-list li {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.9rem;
-      margin-bottom: 8px;
-      color: #191970;
-    }
-    .micro-list li i {
-      font-size: 0.7rem;
-      background: #19197020;
-      border-radius: 10px;
-      padding: 2px;
-    }
-
-    /* bottom area with animated marquee (subtle) */
-    .info-ticker {
-      margin-top: 1.5rem;
-      padding: 1rem 0;
-      border-top: 1px solid #1919701a;
-      border-bottom: 1px solid #1919701a;
-      overflow: hidden;
-      white-space: nowrap;
-    }
-    .ticker-content {
-      display: inline-block;
-      animation: tickerMove 28s linear infinite;
-      font-size: 0.95rem;
-      color: #191970cc;
-    }
-    .ticker-content i {
-      margin: 0 1.2rem;
-      font-size: 1rem;
-      opacity: 0.5;
-    }
-    @keyframes tickerMove {
-      0% { transform: translateX(0); }
-      100% { transform: translateX(-38%); }
-    }
-
-    /* additional context – live badges */
-    .live-dots {
-      display: flex;
-      gap: 0.4rem;
-      align-items: center;
-      margin-top: 1rem;
-      font-size: 0.8rem;
-      font-weight: 400;
-      color: #191970;
-    }
-    .dot-pulse {
-      width: 8px; height: 8px;
-      background: #191970;
-      border-radius: 50%;
-      animation: pulse 1.5s infinite;
-    }
-    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
-
-    /* footer minimal */
-    .footer-note {
-      text-align: center;
-      padding: 1rem 5%;
-      color: #191970aa;
-      font-size: 0.9rem;
-      border-top: 1px solid #19197018;
-      background: #eceff13a;
-      backdrop-filter: blur(4px);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .footer-note i {
-      margin: 0 6px;
-    }
-
-    /* responsive touch */
-    @media (max-width: 950px) {
-      .hero-grid { grid-template-columns: 1fr; }
-      .main-headline { font-size: 3rem; }
-    }
-    @media (max-width: 550px) {
-      .top-bar { flex-direction: column; align-items: start; gap: 1rem; }
-      .stat-grid { grid-template-columns: 1fr; }
+    hr {
+      border: 0.5px solid rgba(25,25,112,0.1);
+      margin: 2rem 0;
     }
   </style>
 </head>
 <body>
-  <!-- dynamic background layers -->
-  <div class="dynamic-bg"></div>
-  <div class="floating-shape shape1"></div>
-  <div class="floating-shape shape2"></div>
-
-  <!-- main LANDSCAPE (1 out of 1 full experience) -->
-  <div class="landscape">
-
-    <!-- header with logo (assets/images/clinic.png) and no register -->
-    <div class="top-bar">
-      <div class="logo-area">
-        <!-- premium logo display using given path -->
-        <img src="assets/images/clinic.png" alt="ICARE insignia" class="logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-        <div class="clinic-name">ICARE<span>collegiate clinic · grade 11 – 4th year</span></div>
+  <!-- fixed navigation (register omitted) -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <div class="logo-wrapper">
+        <!-- logo from assets/images/clinic.png (fallback if missing) -->
+        <img src="assets/images/clinic.png" alt="ICARE" class="logo-img" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'44\' height=\'44\' viewBox=\'0 0 24 24\' fill=\'%23191970\'%3E%3Cpath d=\'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z\'/%3E%3C/svg%3E';">
+        <span class="logo-text">ICARE<span>clinic</span></span>
       </div>
-      <div class="nav-links">
-        <a href="#"><i class="fas fa-clinic-medical"></i> dashboard</a>
-        <a href="#"><i class="fas fa-notes-medical"></i> clearances</a>
-        <a href="#"><i class="fas fa-history"></i> visits</a>
-        <!-- no register, only premium icons -->
+      <ul class="nav-links">
+        <li><a href="#home">Home</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#about">About</a></li>
+        <li><a href="#contact">Contact</a></li>
+        <!-- only login – no register -->
+        <li><a href="login.php" class="btn btn-outline"><i class="fas fa-arrow-right-to-bracket" style="font-size: 0.9rem;"></i> Login</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- hero / home -->
+  <section id="home" class="hero">
+    <div class="floating-shape"></div>
+    <div class="floating-shape-two"></div>
+    <div class="container">
+      <div class="hero-content">
+        <div class="hero-accent">
+          <i class="fas fa-stethoscope" style="margin-right: 0.4rem;"></i> grades 11 – 4th year
+        </div>
+        <h1>health,<br>cleared for <span style="border-bottom: 3px solid #191970;">academics</span></h1>
+        <p>ICARE clinic — purpose‑built for college & senior high. Digital clearance, smart visits, and instant records, all within your school.</p>
+        <div class="hero-buttons">
+          <a href="login.php" class="btn btn-primary"><i class="fas fa-clinic-medical"></i> staff access</a>
+          <a href="#features" class="btn btn-outline"><i class="fas fa-star"></i> explore tools</a>
+        </div>
+        <!-- subtle stats -->
+        <div style="margin-top: 3rem; display: flex; gap: 2rem;">
+          <div><i class="fas fa-check-circle" style="color: #191970;"></i> <strong>1.2k+</strong> <span style="opacity: 0.6;">students</span></div>
+          <div><i class="fas fa-clock"></i> <strong>real‑time</strong> <span style="opacity: 0.6;">updates</span></div>
+        </div>
+      </div>
+
+      <div class="hero-visual">
+        <!-- icon grid (premium, no emoji) -->
+        <div class="icon-grid">
+          <div class="icon-card"><i class="fas fa-notes-medical"></i> <span>clearance</span></div>
+          <div class="icon-card"><i class="fas fa-vial"></i> <span>check‑up</span></div>
+          <div class="icon-card"><i class="fas fa-heart-pulse"></i> <span>vitals</span></div>
+          <div class="icon-card"><i class="fas fa-shield-virus"></i> <span>immunize</span></div>
+        </div>
+        <!-- tiny floating badge with logo reassurance -->
+        <div style="position: absolute; bottom: 0; right: 0; background: #191970; color: #ECEFF1; border-radius: 60px; padding: 0.5rem 1.2rem; font-weight: 500; font-size: 0.9rem; backdrop-filter: blur(4px);">
+          <i class="fas fa-id-card"></i> ICARE · since 2026
+        </div>
       </div>
     </div>
+  </section>
 
-    <!-- main hero grid — 1/1 bespoke layout -->
-    <div class="hero-grid">
+  <!-- features section -->
+  <section id="features" class="section">
+    <div class="container">
+      <h2 class="section-title">designed for <span style="background: #191970; color: #ECEFF1; padding: 0 1rem;">campus clinic</span></h2>
+      <p class="section-subhead">Everything a higher education clinic needs — no clutter, just essential tools in midnight & soft grey.</p>
 
-      <!-- LEFT SIDE: everything context, animation, stats -->
-      <div class="hero-text">
-        <div class="badge">
-          <i class="fas fa-shield-heart"></i> dedicated to grades 11–college · 24/7 RN
+      <div class="features-grid">
+        <div class="feature-item">
+          <div class="feature-icon-lg"><i class="fas fa-file-prescription"></i></div>
+          <h3>clearance hub</h3>
+          <p>Digital fit‑to‑return, sports & event slips. Track request history, expiry, and print official forms.</p>
         </div>
-        <h1 class="main-headline">
-          <i class="fas fa-plus-circle"></i> beyond <br>first aid
-        </h1>
-        <div class="headline-desc">
-          where health meets academic resilience — clearance, emergency, & wellness under one roof.
+        <div class="feature-item">
+          <div class="feature-icon-lg"><i class="fas fa-truck-medical"></i></div>
+          <h3>emergency & incidents</h3>
+          <p>Log incidents, notify parents, record ambulance calls. Structured for immediate response.</p>
         </div>
-
-        <!-- animated stats blocks (real data feel) -->
-        <div class="stat-grid">
-          <div class="stat-item">
-            <i class="fas fa-file-prescription stat-icon"></i>
-            <div class="stat-number">276</div>
-            <div class="stat-label">clearances (Feb)</div>
-          </div>
-          <div class="stat-item">
-            <i class="fas fa-truck-medical stat-icon"></i>
-            <div class="stat-number">13</div>
-            <div class="stat-label">emergencies</div>
-          </div>
-          <div class="stat-item">
-            <i class="fas fa-capsules stat-icon"></i>
-            <div class="stat-number">38</div>
-            <div class="stat-label">dispensations</div>
-          </div>
+        <div class="feature-item">
+          <div class="feature-icon-lg"><i class="fas fa-capsules"></i></div>
+          <h3>medicine stock</h3>
+          <p>Track supplies, expiry, request approvals, and dispensing. Barcode‑ready item codes.</p>
         </div>
-
-        <!-- feature row with icons (premium, no emoji) -->
-        <div class="feature-list">
-          <div class="feature-row">
-            <i class="fas fa-file-certificate"></i>
-            <span>Fit-to-return certificates · post‑illness assessment</span>
-          </div>
-          <div class="feature-row">
-            <i class="fas fa-person-walking"></i>
-            <span>Work immersion / sports clearance within 2h</span>
-          </div>
-          <div class="feature-row">
-            <i class="fas fa-syringe"></i>
-            <span>vaccination & deworming drives (onsite)</span>
-          </div>
-          <div class="feature-row">
-            <i class="fas fa-heart-pulse"></i>
-            <span>physical exam & screening events</span>
-          </div>
-        </div>
-
-        <!-- live pulse indicator + subtle motion -->
-        <div class="live-dots">
-          <span class="dot-pulse"></span> <span>clinic · 7 attendees now</span>
-          <i class="fas fa-chevron-right" style="margin-left: auto; opacity: 0.5;"></i>
+        <div class="feature-item">
+          <div class="feature-icon-lg"><i class="fas fa-notes-medical"></i></div>
+          <h3>visit & physical exams</h3>
+          <p>Log visit history, vitals, deworming, vaccination — all connected to student ID.</p>
         </div>
       </div>
+    </div>
+  </section>
 
-      <!-- RIGHT PANEL: rich interactive cards (lots happening) -->
-      <div class="right-panel">
-
-        <!-- clearance / requests glass card (dynamic) -->
-        <div class="glass-panel">
-          <div class="card-title">
-            <i class="fas fa-pen-ruler"></i> recent clearance requests
-          </div>
-          <div class="clearance-feed">
-            <div class="feed-entry">
-              <div class="entry-left">
-                <div class="entry-icon"><i class="fas fa-user-graduate"></i></div>
-                <div class="entry-info">
-                  <h4>Pesuelo, Manuel D. · 4th Yr</h4>
-                  <p>sports clearance #CLR-20260227-2739</p>
-                </div>
-              </div>
-              <div class="entry-status">pending</div>
+  <!-- about + statistics (no register) -->
+  <section id="about" class="section" style="padding-top: 0;">
+    <div class="container">
+      <div class="about-grid">
+        <div class="about-text">
+          <span class="pill-badge"><i class="fas fa-hospital-user"></i> exclusively 11–college</span>
+          <h2>one clinic,<br>four academic years.</h2>
+          <p>ICARE is built for the busiest school stage: from grade 11 to 4th year college. We combine clearance workflows, medical certificates, and parental notifications in a single, secure system — no patient modules, only student‑first design.</p>
+          <div class="stat-cards">
+            <div class="stat-item">
+              <div class="stat-number">4</div>
+              <div class="stat-label">year levels</div>
             </div>
-            <div class="feed-entry">
-              <div class="entry-left">
-                <div class="entry-icon"><i class="fas fa-basketball"></i></div>
-                <div class="entry-info">
-                  <h4>Galido, Kyle T. · Grade 12</h4>
-                  <p>after injury · approved (Viray)</p>
-                </div>
-              </div>
-              <div class="entry-status status-approve">approved</div>
+            <div class="stat-item">
+              <div class="stat-number">2.5k</div>
+              <div class="stat-label">active students</div>
             </div>
-            <div class="feed-entry">
-              <div class="entry-left">
-                <div class="entry-icon"><i class="fas fa-lungs"></i></div>
-                <div class="entry-info">
-                  <h4>Incident #EMG‑20260227‑3388</h4>
-                  <p>asthma · referred to east ave</p>
-                </div>
-              </div>
-              <div class="entry-status status-approve">emergency</div>
+            <div class="stat-item">
+              <div class="stat-number">98%</div>
+              <div class="stat-label">faster clearance</div>
             </div>
-            <div class="feed-entry">
-              <div class="entry-left">
-                <div class="entry-icon"><i class="fas fa-capsules"></i></div>
-                <div class="entry-info">
-                  <h4>medicine request #MED-MEF-001</h4>
-                  <p>10 capsules · urgent</p>
-                </div>
-              </div>
-              <div class="entry-status status-approve">released</div>
-            </div>
-          </div>
-          <!-- micro stats -->
-          <div style="display: flex; justify-content: space-between; margin-top: 1.5rem; color: #191970cc; font-size: 0.9rem; border-top: 1px dashed #19197030; padding-top: 1rem;">
-            <span><i class="fas fa-check-circle"></i> 32 cleared today</span>
-            <span><i class="fas fa-spinner"></i> 5 pending</span>
           </div>
         </div>
-
-        <!-- double mini-card: stock & visits (with real data) -->
-        <div class="split-card">
-          <div class="mini-card">
-            <i class="fas fa-thermometer-half"></i>
-            <h3>38.1 °C</h3>
-            <p>last visit: M. Pesuelo (fever)</p>
-            <ul class="micro-list">
-              <li><i class="fas fa-tablets"></i> Paracetamol 500mg · dispensed</li>
-              <li><i class="fas fa-clock"></i> visit #7 · 19:52</li>
-              <li><i class="fas fa-user-md"></i> attended by yukki</li>
-            </ul>
-          </div>
-          <div class="mini-card">
-            <i class="fas fa-boxes-stacked"></i>
-            <h3>clinic stock</h3>
-            <p>5 medicines · 4 supplies</p>
-            <ul class="micro-list">
-              <li><i class="fas fa-capsules"></i> Mefenamic acid (10 caps)</li>
-              <li><i class="fas fa-syringe"></i> Gauze pads, tape, masks</li>
-              <li><i class="fas fa-exclamation-triangle"></i> 2 items below min</li>
-            </ul>
-          </div>
+        <div class="about-visual">
+          <!-- logo repeated + abstract -->
+          <img src="assets/images/clinic.png" alt="ICARE badge" style="width: 90px; height: 90px; object-fit: contain; margin-bottom: 1rem;" onerror="this.style.display='none'">
+          <i class="fas fa-hand-holding-heart"></i>
+          <i class="fas fa-laptop-medical"></i>
+          <i class="fas fa-clipboard-list"></i>
+          <p style="margin-top: 1.5rem; font-weight: 500;"><i class="fas fa-check-circle" style="color: #191970;"></i> integrated with school ID system</p>
         </div>
-
-        <!-- additional high‑impact: physical exam / certificate summary -->
-        <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: space-between; background: transparent;">
-          <span style="background: #19197010; border-radius: 30px; padding: 0.5rem 1.2rem; border: 1px solid #19197030;"><i class="fas fa-file-waveform" style="margin-right: 8px;"></i> physical exam: K. Galido 25.95 BMI</span>
-          <span style="background: #19197010; border-radius: 30px; padding: 0.5rem 1.2rem; border: 1px solid #19197030;"><i class="fas fa-stethoscope"></i> fit for PE · CERT‑20260227‑7997</span>
-        </div>
-
-      </div> <!-- end right panel -->
-    </div> <!-- end hero grid -->
-
-    <!-- ticker with infinite context (clinic activity) -->
-    <div class="info-ticker">
-      <div class="ticker-content">
-        <i class="fas fa-circle"></i> INC‑20260227‑8914 (slipped, first aid) 
-        <i class="fas fa-circle"></i> dispensing log #5 · Paracetamol to M. Pesuelo 
-        <i class="fas fa-circle"></i> emergency case #1 · ambulance called 15:35 
-        <i class="fas fa-circle"></i> physical exam record #2 · M. Pesuelo 24.22 BMI 
-        <i class="fas fa-circle"></i> stock received: surgical masks (SUP-MAS-001) 
-        <i class="fas fa-circle"></i> clearance CLR‑20260228‑7244 approved 
-        <i class="fas fa-circle"></i> deworming scheduled march 15 
       </div>
     </div>
+  </section>
 
-    <!-- footer with policy links and superadmin touch (no register) -->
-    <div class="footer-note">
-      <span><i class="far fa-copyright"></i> ICARE collegiate clinic · grade 11–4th year</span>
-      <span><i class="fas fa-shield"></i> staff · superadmin </span>
-      <span><i class="fas fa-clock"></i> live data 28 feb 2026 14:32</span>
+  <!-- contact (no register) -->
+  <section id="contact" class="section" style="background: rgba(25,25,112,0.02);">
+    <div class="container">
+      <h2 class="section-title">reach ICARE clinic</h2>
+      <p class="section-subhead">located at the main building · open 7am – 5pm, Mon–Fri</p>
+      <div class="contact-cards">
+        <div class="contact-card"><i class="fas fa-map-pin"></i> <span>Rm. 201, Health Hub</span></div>
+        <div class="contact-card"><i class="fas fa-phone"></i> <span>(02) 8877 4412</span></div>
+        <div class="contact-card"><i class="fas fa-envelope"></i> <span>icare@clinic.edu</span></div>
+      </div>
+      <!-- small badge: no register option needed -->
+      <div style="text-align: center; margin-top: 3rem; opacity: 0.6;">
+        <i class="fas fa-shield-alt"></i> secure access · staff & clinic personnel only
+      </div>
     </div>
-  </div>
+  </section>
 
-  <!-- subtle hover micro-interactions (no extra code needed) -->
+  <!-- footer -->
+  <footer class="footer">
+    <div class="container">
+      <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <img src="assets/images/clinic.png" alt="" style="height: 28px; width: 28px; object-fit: contain;" onerror="this.style.display='none'">
+        <small>© 2026 ICARE — school clinic for grades 11–4th year. all rights reserved.</small>
+      </div>
+      <div class="footer-links">
+        <a href="#home"><i class="fas fa-chevron-up"></i> top</a>
+        <a href="#">privacy</a>
+        <a href="login.php"><i class="fas fa-lock"></i> login</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- subtle hover animation assets -->
 </body>
 </html>
