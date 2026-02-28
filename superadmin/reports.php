@@ -79,8 +79,328 @@ $date_to = isset($_REQUEST['date_to']) ? $_REQUEST['date_to'] : date('Y-m-d');
 $export_type = isset($_REQUEST['export_type']) ? $_REQUEST['export_type'] : 'full';
 $search = isset($_REQUEST['search']) ? $_REQUEST['search'] : '';
 
-// Function to export to PDF
+// AI Insights Functions
+function getAIPredictions($db, $date_from, $date_to) {
+    $predictions = [];
+    
+    // Predict future incidents based on historical patterns
+    $query = "SELECT 
+                DATE(incident_date) as date,
+                COUNT(*) as incident_count,
+                incident_type
+              FROM incidents 
+              WHERE incident_date BETWEEN DATE_SUB(:date_to, INTERVAL 30 DAY) AND :date_to
+              GROUP BY DATE(incident_date), incident_type
+              ORDER BY date DESC";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':date_to', $date_to);
+    $stmt->execute();
+    $incident_history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Calculate average incidents per day for prediction
+    if (count($incident_history) > 0) {
+        $total_incidents = count($incident_history);
+        $days_analyzed = 30;
+        $avg_daily_incidents = $total_incidents / $days_analyzed;
+        
+        // Predict next 7 days
+        $predicted_incidents = round($avg_daily_incidents * 7);
+        $predictions['next_week_incidents'] = [
+            'value' => $predicted_incidents,
+            'confidence' => min(85, 50 + ($total_incidents * 2)), // Higher confidence with more data
+            'trend' => $avg_daily_incidents > 1 ? 'increasing' : 'stable'
+        ];
+    }
+    
+    // Predict medicine stock depletion
+    $query = "SELECT 
+                cs.item_name,
+                cs.item_code,
+                cs.quantity,
+                cs.minimum_stock,
+                cs.unit,
+                COALESCE(SUM(dl.quantity), 0) as monthly_usage
+              FROM clinic_stock cs
+              LEFT JOIN dispensing_log dl ON cs.item_code = dl.item_code 
+                AND dl.dispensed_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+              WHERE cs.category = 'Medicine'
+              GROUP BY cs.id
+              HAVING cs.quantity > 0";
+    $stmt = $db->query($query);
+    $stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $predictions['stock_alerts'] = [];
+    foreach ($stock_items as $item) {
+        $monthly_usage = $item['monthly_usage'];
+        if ($monthly_usage > 0) {
+            $months_remaining = $item['quantity'] / $monthly_usage;
+            $days_remaining = round($months_remaining * 30);
+            
+            if ($days_remaining <= 30) {
+                $predictions['stock_alerts'][] = [
+                    'item_name' => $item['item_name'],
+                    'item_code' => $item['item_code'],
+                    'days_remaining' => $days_remaining,
+                    'current_quantity' => $item['quantity'],
+                    'monthly_usage' => $monthly_usage,
+                    'unit' => $item['unit'],
+                    'priority' => $days_remaining <= 7 ? 'high' : ($days_remaining <= 14 ? 'medium' : 'low')
+                ];
+            }
+        }
+    }
+    
+    // Predict peak clinic hours
+    $query = "SELECT 
+                HOUR(visit_time) as hour,
+                COUNT(*) as visit_count,
+                DAYNAME(visit_date) as day_name
+              FROM visit_history 
+              WHERE visit_date BETWEEN :date_from AND :date_to
+              GROUP BY HOUR(visit_time), DAYNAME(visit_date)
+              ORDER BY visit_count DESC
+              LIMIT 5";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':date_from', $date_from);
+    $stmt->bindParam(':date_to', $date_to);
+    $stmt->execute();
+    $peak_hours = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $predictions['peak_hours'] = $peak_hours;
+    
+    return $predictions;
+}
+
+function detectAnomalies($db, $date_from, $date_to) {
+    $anomalies = [];
+    
+    // Detect unusual incident patterns
+    $query = "SELECT 
+                incident_type,
+                COUNT(*) as type_count,
+                (SELECT AVG(cnt) FROM 
+                    (SELECT COUNT(*) as cnt 
+                     FROM incidents 
+                     WHERE incident_date BETWEEN DATE_SUB(:date_to, INTERVAL 90 DAY) AND :date_to
+                     GROUP BY incident_type) as avg_counts) as historical_avg
+              FROM incidents 
+              WHERE incident_date BETWEEN :date_from AND :date_to
+              GROUP BY incident_type
+              HAVING type_count > historical_avg * 2";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':date_from', $date_from);
+    $stmt->bindParam(':date_to', $date_to);
+    $stmt->execute();
+    $incident_anomalies = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    foreach ($incident_anomalies as $anomaly) {
+        $anomalies[] = [
+            'type' => 'incident_pattern',
+            'severity' => 'high',
+            'message' => "Unusual spike in {$anomaly['incident_type']} incidents detected",
+            'details' => "Current: {$anomaly['type_count']} vs Average: " . round($anomaly['historical_avg'])
+        ];
+    }
+    
+    // Detect unusual medicine dispensing patterns
+    $query = "SELECT 
+                item_name,
+                COUNT(*) as dispense_count,
+                (SELECT AVG(cnt) FROM 
+                    (SELECT COUNT(*) as cnt 
+                     FROM dispensing_log 
+                     WHERE dispensed_date BETWEEN DATE_SUB(:date_to, INTERVAL 90 DAY) AND :date_to
+                     GROUP BY item_name) as avg_counts) as historical_avg
+              FROM dispensing_log 
+              WHERE dispensed_date BETWEEN :date_from AND :date_to
+              GROUP BY item_name
+              HAVING dispense_count > historical_avg * 2.5";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':date_from', $date_from);
+    $stmt->bindParam(':date_to', $date_to);
+    $stmt->execute();
+    $medicine_anomalies = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    foreach ($medicine_anomalies as $anomaly) {
+        $anomalies[] = [
+            'type' => 'medicine_usage',
+            'severity' => 'medium',
+            'message' => "Unusual increase in {$anomaly['item_name']} dispensing",
+            'details' => "Current: {$anomaly['dispense_count']} vs Average: " . round($anomaly['historical_avg'])
+        ];
+    }
+    
+    return $anomalies;
+}
+
+function getSeasonalTrends($db, $date_from, $date_to) {
+    $trends = [];
+    
+    // Analyze monthly patterns
+    $query = "SELECT 
+                MONTH(visit_date) as month,
+                COUNT(*) as visit_count,
+                GROUP_CONCAT(DISTINCT complaint) as common_complaints
+              FROM visit_history 
+              WHERE visit_date BETWEEN DATE_SUB(:date_to, INTERVAL 12 MONTH) AND :date_to
+              GROUP BY MONTH(visit_date)
+              ORDER BY month";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':date_to', $date_to);
+    $stmt->execute();
+    $monthly_trends = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Find peak months
+    $max_visits = 0;
+    $peak_month = '';
+    foreach ($monthly_trends as $trend) {
+        if ($trend['visit_count'] > $max_visits) {
+            $max_visits = $trend['visit_count'];
+            $peak_month = DateTime::createFromFormat('!m', $trend['month'])->format('F');
+        }
+    }
+    
+    if ($max_visits > 0) {
+        $trends['peak_season'] = [
+            'month' => $peak_month,
+            'average_visits' => round($max_visits)
+        ];
+    }
+    
+    // Get common seasonal complaints
+    $current_month = date('n', strtotime($date_to));
+    $query = "SELECT 
+                complaint,
+                COUNT(*) as frequency
+              FROM visit_history 
+              WHERE MONTH(visit_date) = :current_month
+              AND visit_date BETWEEN DATE_SUB(:date_to, INTERVAL 2 YEAR) AND :date_to
+              GROUP BY complaint
+              ORDER BY frequency DESC
+              LIMIT 3";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':current_month', $current_month);
+    $stmt->bindParam(':date_to', $date_to);
+    $stmt->execute();
+    $seasonal_complaints = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $trends['seasonal_complaints'] = $seasonal_complaints;
+    
+    return $trends;
+}
+
+function getSmartRecommendations($db, $predictions, $anomalies, $seasonal_trends) {
+    $recommendations = [];
+    
+    // Stock-related recommendations
+    if (!empty($predictions['stock_alerts'])) {
+        $high_priority = array_filter($predictions['stock_alerts'], function($alert) {
+            return $alert['priority'] === 'high';
+        });
+        
+        if (count($high_priority) > 0) {
+            $items = array_column($high_priority, 'item_name');
+            $recommendations[] = [
+                'type' => 'urgent',
+                'icon' => '⚠️',
+                'title' => 'Critical Stock Alert',
+                'message' => 'Immediate reorder needed for: ' . implode(', ', array_slice($items, 0, 3)) . 
+                            (count($items) > 3 ? ' and ' . (count($items) - 3) . ' more items' : ''),
+                'action' => 'Review Stock'
+            ];
+        }
+    }
+    
+    // Incident pattern recommendations
+    foreach ($anomalies as $anomaly) {
+        if ($anomaly['type'] === 'incident_pattern' && $anomaly['severity'] === 'high') {
+            $recommendations[] = [
+                'type' => 'preventive',
+                'icon' => '🛡️',
+                'title' => 'Preventive Action Needed',
+                'message' => $anomaly['message'] . '. Consider reviewing safety protocols.',
+                'action' => 'Review Incidents'
+            ];
+            break;
+        }
+    }
+    
+    // Seasonal preparation recommendations
+    if (!empty($seasonal_trends['peak_season'])) {
+        $current_month = date('F');
+        $peak_month = $seasonal_trends['peak_season']['month'];
+        
+        // Check if peak season is approaching (within 2 months)
+        $current_month_num = date('n');
+        $peak_month_num = date('n', strtotime($peak_month . ' 1'));
+        $months_diff = ($peak_month_num - $current_month_num + 12) % 12;
+        
+        if ($months_diff <= 2 && $months_diff > 0) {
+            $recommendations[] = [
+                'type' => 'preparation',
+                'icon' => '📅',
+                'title' => 'Peak Season Preparation',
+                'message' => "Prepare for peak clinic visits in {$peak_month} (avg {$seasonal_trends['peak_season']['average_visits']} visits). Stock up on common medications.",
+                'action' => 'Prepare Stock'
+            ];
+        }
+    }
+    
+    // Common seasonal complaints recommendations
+    if (!empty($seasonal_trends['seasonal_complaints'])) {
+        $complaints = array_column($seasonal_trends['seasonal_complaints'], 'complaint');
+        $recommendations[] = [
+            'type' => 'health_advisory',
+            'icon' => '💊',
+            'title' => 'Seasonal Health Advisory',
+            'message' => 'Common this month: ' . implode(', ', array_slice($complaints, 0, 3)) . 
+                        '. Ensure adequate supplies for these conditions.',
+            'action' => 'Check Supplies'
+        ];
+    }
+    
+    // Workload prediction
+    if (isset($predictions['next_week_incidents'])) {
+        $trend = $predictions['next_week_incidents']['trend'];
+        if ($trend === 'increasing') {
+            $recommendations[] = [
+                'type' => 'workload',
+                'icon' => '📊',
+                'title' => 'Increasing Incident Trend',
+                'message' => "Predicted {$predictions['next_week_incidents']['value']} incidents next week. Consider adjusting staff schedule.",
+                'action' => 'View Schedule'
+            ];
+        }
+    }
+    
+    // Peak hours optimization
+    if (!empty($predictions['peak_hours'])) {
+        $peak = $predictions['peak_hours'][0];
+        $hour = $peak['hour'];
+        $period = $hour < 12 ? 'morning' : ($hour < 17 ? 'afternoon' : 'evening');
+        $recommendations[] = [
+            'type' => 'optimization',
+            'icon' => '⏰',
+            'title' => 'Peak Hours Optimization',
+            'message' => "Busiest time: {$peak['day_name']}s at " . 
+                        date('g A', strtotime("{$hour}:00")) . 
+                        ". Consider optimizing staff schedule during these hours.",
+            'action' => 'Optimize Schedule'
+        ];
+    }
+    
+    return $recommendations;
+}
+
+// Get AI insights
+$predictions = getAIPredictions($db, $date_from, $date_to);
+$anomalies = detectAnomalies($db, $date_from, $date_to);
+$seasonal_trends = getSeasonalTrends($db, $date_from, $date_to);
+$recommendations = getSmartRecommendations($db, $predictions, $anomalies, $seasonal_trends);
+
+// Function to export to PDF (existing function - keep as is)
 function exportToPDF($report_type, $date_from, $date_to, $export_type, $search, $db) {
+    // ... (keep your existing exportToPDF function code here)
     // Create new PDF instance
     $pdf = new FPDF();
     $pdf->AddPage();
@@ -150,7 +470,7 @@ function exportToPDF($report_type, $date_from, $date_to, $export_type, $search, 
     $pdf->Output('D', $filename);
 }
 
-// Function to get report data
+// Function to get report data (keep your existing function)
 function getReportData($report_type, $date_from, $date_to, $export_type, $search, $db) {
     $data = [];
     $params = [];
@@ -318,7 +638,7 @@ function getReportData($report_type, $date_from, $date_to, $export_type, $search
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// Report generation functions
+// Report generation functions (keep all your existing functions)
 function generateUsersReport($pdf, $data) {
     $pdf->SetFont('Arial', 'B', 14);
     $pdf->Cell(0, 10, 'User Report', 0, 1, 'L');
@@ -966,7 +1286,7 @@ $preview_data = array_slice($preview_data, 0, 10);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reports - Super Admin | MedFlow Clinic Management System</title>
+    <title>Reports & AI Analytics - Super Admin | MedFlow Clinic Management System</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
@@ -1082,6 +1402,217 @@ $preview_data = array_slice($preview_data, 0, 10);
     .btn-secondary:hover {
         background: #cfd8dc;
         transform: translateY(-2px);
+    }
+
+    /* AI Insights Section */
+    .ai-insights-section {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 20px;
+        padding: 30px;
+        margin-bottom: 30px;
+        color: white;
+        position: relative;
+        overflow: hidden;
+        animation: fadeInUp 0.5s ease;
+    }
+
+    .ai-insights-section::before {
+        content: '✨';
+        position: absolute;
+        top: 10px;
+        right: 20px;
+        font-size: 40px;
+        opacity: 0.2;
+    }
+
+    .ai-header {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        margin-bottom: 25px;
+    }
+
+    .ai-icon {
+        width: 50px;
+        height: 50px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 15px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        backdrop-filter: blur(5px);
+    }
+
+    .ai-header h2 {
+        font-size: 1.8rem;
+        font-weight: 600;
+    }
+
+    .ai-header p {
+        opacity: 0.9;
+        font-size: 1rem;
+    }
+
+    .ai-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+        margin-top: 20px;
+    }
+
+    .ai-card {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 16px;
+        padding: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        transition: all 0.3s ease;
+    }
+
+    .ai-card:hover {
+        transform: translateY(-5px);
+        background: rgba(255, 255, 255, 0.15);
+    }
+
+    .ai-card-title {
+        font-size: 1rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        opacity: 0.8;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .ai-card-value {
+        font-size: 2.2rem;
+        font-weight: 700;
+        margin-bottom: 5px;
+    }
+
+    .ai-card-label {
+        font-size: 0.9rem;
+        opacity: 0.7;
+    }
+
+    .confidence-badge {
+        background: rgba(255, 255, 255, 0.2);
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        display: inline-block;
+        margin-top: 10px;
+    }
+
+    .trend-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        margin-left: 10px;
+    }
+
+    .trend-up { background: rgba(76, 175, 80, 0.3); color: #c8e6c9; }
+    .trend-down { background: rgba(244, 67, 54, 0.3); color: #ffcdd2; }
+    .trend-stable { background: rgba(255, 152, 0, 0.3); color: #ffe0b2; }
+
+    /* Anomaly Alerts */
+    .anomaly-alert {
+        background: rgba(244, 67, 54, 0.15);
+        border-left: 4px solid #f44336;
+        padding: 15px;
+        border-radius: 12px;
+        margin-top: 20px;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+
+    .anomaly-icon {
+        font-size: 24px;
+    }
+
+    .anomaly-content {
+        flex: 1;
+    }
+
+    .anomaly-title {
+        font-weight: 600;
+        margin-bottom: 5px;
+    }
+
+    .anomaly-details {
+        font-size: 0.9rem;
+        opacity: 0.9;
+    }
+
+    /* Recommendations */
+    .recommendations-section {
+        margin-top: 20px;
+    }
+
+    .recommendation-item {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        padding: 15px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .recommendation-item:last-child {
+        border-bottom: none;
+    }
+
+    .rec-icon {
+        width: 40px;
+        height: 40px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+    }
+
+    .rec-content {
+        flex: 1;
+    }
+
+    .rec-title {
+        font-weight: 600;
+        margin-bottom: 3px;
+    }
+
+    .rec-message {
+        font-size: 0.85rem;
+        opacity: 0.8;
+    }
+
+    .rec-action {
+        padding: 6px 12px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 20px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .rec-action:hover {
+        background: rgba(255, 255, 255, 0.3);
+    }
+
+    /* Peak Hours Tags */
+    .peak-hours-tag {
+        display: inline-block;
+        padding: 4px 12px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 20px;
+        font-size: 0.85rem;
+        margin: 5px;
     }
 
     /* Filter Section */
@@ -1498,6 +2029,10 @@ $preview_data = array_slice($preview_data, 0, 10);
         .stats-grid {
             grid-template-columns: repeat(2, 1fr);
         }
+        
+        .ai-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
     }
 
     @media (max-width: 768px) {
@@ -1518,6 +2053,10 @@ $preview_data = array_slice($preview_data, 0, 10);
             flex-direction: column;
             gap: 12px;
         }
+        
+        .ai-grid {
+            grid-template-columns: 1fr;
+        }
     }
     </style>
 </head>
@@ -1531,8 +2070,8 @@ $preview_data = array_slice($preview_data, 0, 10);
             <div class="dashboard-container">
                 <div class="page-header">
                     <div>
-                        <h1>Reports & Analytics</h1>
-                        <p>Generate and export comprehensive system reports</p>
+                        <h1>Reports & AI Analytics</h1>
+                        <p>Intelligent insights and predictive analytics for your clinic</p>
                     </div>
                     <div class="header-actions">
                         <button class="btn btn-secondary" onclick="resetFilters()">
@@ -1542,6 +2081,159 @@ $preview_data = array_slice($preview_data, 0, 10);
                             Reset Filters
                         </button>
                     </div>
+                </div>
+
+                <!-- AI Insights Section -->
+                <div class="ai-insights-section">
+                    <div class="ai-header">
+                        <div class="ai-icon">🤖</div>
+                        <div>
+                            <h2>AI-Powered Insights</h2>
+                            <p>Real-time analysis and predictions based on your clinic data</p>
+                        </div>
+                    </div>
+
+                    <!-- Prediction Cards -->
+                    <div class="ai-grid">
+                        <?php if (isset($predictions['next_week_incidents'])): ?>
+                        <div class="ai-card">
+                            <div class="ai-card-title">
+                                <span>📊</span> Incident Forecast
+                            </div>
+                            <div class="ai-card-value">
+                                <?php echo $predictions['next_week_incidents']['value']; ?>
+                                <span style="font-size: 1rem; opacity: 0.7;">next 7 days</span>
+                            </div>
+                            <div class="ai-card-label">Predicted incidents</div>
+                            <div class="confidence-badge">
+                                🤖 AI Confidence: <?php echo $predictions['next_week_incidents']['confidence']; ?>%
+                            </div>
+                            <span class="trend-indicator trend-<?php echo $predictions['next_week_incidents']['trend']; ?>">
+                                <?php if ($predictions['next_week_incidents']['trend'] == 'increasing'): ?>
+                                    📈 Increasing trend
+                                <?php elseif ($predictions['next_week_incidents']['trend'] == 'decreasing'): ?>
+                                    📉 Decreasing trend
+                                <?php else: ?>
+                                    ➡️ Stable trend
+                                <?php endif; ?>
+                            </span>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- Stock Alerts Summary -->
+                        <div class="ai-card">
+                            <div class="ai-card-title">
+                                <span>💊</span> Stock Alerts
+                            </div>
+                            <div class="ai-card-value">
+                                <?php echo count($predictions['stock_alerts'] ?? []); ?>
+                            </div>
+                            <div class="ai-card-label">Items need attention</div>
+                            <?php if (!empty($predictions['stock_alerts'])): ?>
+                                <?php 
+                                $urgent = array_filter($predictions['stock_alerts'], function($item) {
+                                    return $item['priority'] == 'high';
+                                });
+                                ?>
+                                <?php if (count($urgent) > 0): ?>
+                                    <div class="confidence-badge" style="background: rgba(244, 67, 54, 0.3);">
+                                        ⚠️ <?php echo count($urgent); ?> urgent reorder needed
+                                    </div>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                        </div>
+
+                        <!-- Peak Season -->
+                        <?php if (!empty($seasonal_trends['peak_season'])): ?>
+                        <div class="ai-card">
+                            <div class="ai-card-title">
+                                <span>📅</span> Peak Season
+                            </div>
+                            <div class="ai-card-value">
+                                <?php echo $seasonal_trends['peak_season']['month']; ?>
+                            </div>
+                            <div class="ai-card-label">
+                                Busiest month (avg <?php echo $seasonal_trends['peak_season']['average_visits']; ?> visits)
+                            </div>
+                            <?php 
+                            $current_month_num = date('n');
+                            $peak_month_num = date('n', strtotime($seasonal_trends['peak_season']['month'] . ' 1'));
+                            $months_until_peak = ($peak_month_num - $current_month_num + 12) % 12;
+                            if ($months_until_peak <= 2 && $months_until_peak > 0):
+                            ?>
+                            <div class="confidence-badge" style="background: rgba(255, 193, 7, 0.3);">
+                                ⏰ Peak season in <?php echo $months_until_peak; ?> month(s)
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- Peak Hours -->
+                        <?php if (!empty($predictions['peak_hours'])): ?>
+                        <div class="ai-card">
+                            <div class="ai-card-title">
+                                <span>⏰</span> Peak Hours
+                            </div>
+                            <div>
+                                <?php foreach ($predictions['peak_hours'] as $peak): ?>
+                                    <span class="peak-hours-tag">
+                                        <?php echo substr($peak['day_name'], 0, 3); ?> 
+                                        <?php echo date('gA', strtotime($peak['hour'] . ':00')); ?>
+                                    </span>
+                                <?php endforeach; ?>
+                            </div>
+                            <div class="ai-card-label" style="margin-top: 10px;">
+                                Busiest times - Consider staff optimization
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Anomaly Alerts -->
+                    <?php if (!empty($anomalies)): ?>
+                        <?php foreach ($anomalies as $anomaly): ?>
+                        <div class="anomaly-alert">
+                            <div class="anomaly-icon">⚠️</div>
+                            <div class="anomaly-content">
+                                <div class="anomaly-title"><?php echo $anomaly['message']; ?></div>
+                                <div class="anomaly-details"><?php echo $anomaly['details']; ?></div>
+                            </div>
+                            <div class="rec-action">Investigate</div>
+                        </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+
+                    <!-- Smart Recommendations -->
+                    <?php if (!empty($recommendations)): ?>
+                    <div class="recommendations-section">
+                        <h3 style="margin-bottom: 15px;">🤖 Smart Recommendations</h3>
+                        <?php foreach ($recommendations as $rec): ?>
+                        <div class="recommendation-item">
+                            <div class="rec-icon"><?php echo $rec['icon']; ?></div>
+                            <div class="rec-content">
+                                <div class="rec-title"><?php echo $rec['title']; ?></div>
+                                <div class="rec-message"><?php echo $rec['message']; ?></div>
+                            </div>
+                            <div class="rec-action"><?php echo $rec['action']; ?></div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php endif; ?>
+
+                    <!-- Seasonal Complaints -->
+                    <?php if (!empty($seasonal_trends['seasonal_complaints'])): ?>
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px; opacity: 0.9;">🌡️ Common Seasonal Complaints</h4>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <?php foreach ($seasonal_trends['seasonal_complaints'] as $complaint): ?>
+                                <span class="peak-hours-tag">
+                                    <?php echo $complaint['complaint']; ?> 
+                                    (<?php echo $complaint['frequency']; ?>)
+                                </span>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Filter Section -->
