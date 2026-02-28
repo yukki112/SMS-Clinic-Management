@@ -935,15 +935,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
             ?>
 
-            <div class="role-hint">
-                <p>authorized personnel only</p>
-                <div class="role-badges">
-                    <span class="role-badge"><i class="fas fa-shield-alt"></i> superadmin</span>
-                    <span class="role-badge"><i class="fas fa-user-nurse"></i> nurse</span>
-                    <span class="role-badge"><i class="fas fa-user-tie"></i> admin</span>
-                    <span class="role-badge"><i class="fas fa-user"></i> staff</span>
-                </div>
-            </div>
+          
         </div>
     </div>
 
