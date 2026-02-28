@@ -8,25 +8,76 @@ if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'supe
     exit();
 }
 
-
 // Include FPDF library
 require_once '../vendor/setasign/fpdf/fpdf.php';
 
 $database = new Database();
 $db = $database->getConnection();
 
-// Get filter parameters - check both GET and POST
+// Initialize variables
+$show_verification_modal = false;
+$verification_error = '';
+$export_params = [];
+
+// Check if export was requested and verification is needed
+if (isset($_POST['export']) && $_POST['export'] == 'pdf' && !isset($_SESSION['verified_export'])) {
+    $show_verification_modal = true;
+    // Store export parameters for after verification
+    $export_params = [
+        'report_type' => $_POST['report_type'] ?? 'summary',
+        'date_from' => $_POST['date_from'] ?? date('Y-m-d', strtotime('-30 days')),
+        'date_to' => $_POST['date_to'] ?? date('Y-m-d'),
+        'export_type' => $_POST['export_type'] ?? 'full',
+        'search' => $_POST['search'] ?? ''
+    ];
+    $_SESSION['pending_export'] = $export_params;
+}
+
+// Handle verification submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['verify_export'])) {
+    $user_id = $_SESSION['user_id'];
+    $password = $_POST['password'];
+    
+    // Verify password
+    $query = "SELECT password FROM users WHERE id = :user_id";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':user_id', $user_id);
+    $stmt->execute();
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($user && password_verify($password, $user['password'])) {
+        $_SESSION['verified_export'] = true;
+        
+        // Get pending export parameters
+        if (isset($_SESSION['pending_export'])) {
+            $params = $_SESSION['pending_export'];
+            exportToPDF(
+                $params['report_type'],
+                $params['date_from'],
+                $params['date_to'],
+                $params['export_type'],
+                $params['search'],
+                $db
+            );
+            exit();
+        }
+    } else {
+        $verification_error = "Invalid password. Export denied.";
+        $show_verification_modal = true;
+    }
+}
+
+// Clear verification if no export in progress
+if (!isset($_SESSION['pending_export']) && isset($_SESSION['verified_export'])) {
+    unset($_SESSION['verified_export']);
+}
+
+// Get filter parameters for display
 $report_type = isset($_REQUEST['report_type']) ? $_REQUEST['report_type'] : 'summary';
 $date_from = isset($_REQUEST['date_from']) ? $_REQUEST['date_from'] : date('Y-m-d', strtotime('-30 days'));
 $date_to = isset($_REQUEST['date_to']) ? $_REQUEST['date_to'] : date('Y-m-d');
 $export_type = isset($_REQUEST['export_type']) ? $_REQUEST['export_type'] : 'full';
 $search = isset($_REQUEST['search']) ? $_REQUEST['search'] : '';
-
-// Handle export
-if (isset($_REQUEST['export']) && $_REQUEST['export'] == 'pdf') {
-    exportToPDF($report_type, $date_from, $date_to, $export_type, $search, $db);
-    exit();
-}
 
 // Function to export to PDF
 function exportToPDF($report_type, $date_from, $date_to, $export_type, $search, $db) {
@@ -89,6 +140,10 @@ function exportToPDF($report_type, $date_from, $date_to, $export_type, $search, 
         default:
             generateSummaryReport($pdf, $data, $db, $date_from, $date_to);
     }
+    
+    // Clear verification after export
+    unset($_SESSION['verified_export']);
+    unset($_SESSION['pending_export']);
     
     // Output PDF
     $filename = $report_type . '_report_' . date('Y-m-d') . '.pdf';
@@ -1266,6 +1321,164 @@ $preview_data = array_slice($preview_data, 0, 10);
         font-style: italic;
     }
 
+    /* Modal Styles */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(5px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        animation: fadeIn 0.3s ease;
+    }
+
+    .modal-container {
+        background: white;
+        border-radius: 24px;
+        width: 90%;
+        max-width: 450px;
+        padding: 30px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        animation: slideUp 0.3s ease;
+    }
+
+    .modal-icon {
+        width: 70px;
+        height: 70px;
+        background: #191970;
+        border-radius: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 20px;
+        color: white;
+    }
+
+    .modal-icon svg {
+        width: 35px;
+        height: 35px;
+    }
+
+    .modal-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #191970;
+        text-align: center;
+        margin-bottom: 10px;
+    }
+
+    .modal-subtitle {
+        color: #546e7a;
+        text-align: center;
+        margin-bottom: 25px;
+        font-size: 0.9rem;
+        line-height: 1.5;
+    }
+
+    .modal-form {
+        margin-top: 20px;
+    }
+
+    .modal-form .form-group {
+        margin-bottom: 20px;
+    }
+
+    .modal-form label {
+        display: block;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #546e7a;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .modal-form .form-control {
+        width: 100%;
+        padding: 14px 16px;
+        font-size: 1rem;
+        border: 2px solid #cfd8dc;
+        border-radius: 12px;
+        transition: all 0.3s ease;
+    }
+
+    .modal-form .form-control:focus {
+        outline: none;
+        border-color: #191970;
+        box-shadow: 0 0 0 3px rgba(25, 25, 112, 0.1);
+    }
+
+    .modal-actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 25px;
+    }
+
+    .modal-btn {
+        flex: 1;
+        padding: 14px;
+        border: none;
+        border-radius: 12px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .modal-btn.primary {
+        background: #191970;
+        color: white;
+    }
+
+    .modal-btn.primary:hover {
+        background: #24248f;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(25, 25, 112, 0.2);
+    }
+
+    .modal-btn.secondary {
+        background: #eceff1;
+        color: #37474f;
+    }
+
+    .modal-btn.secondary:hover {
+        background: #cfd8dc;
+    }
+
+    .modal-error {
+        background: #ffebee;
+        border: 1px solid #ffcdd2;
+        border-radius: 12px;
+        padding: 12px 16px;
+        color: #c62828;
+        font-size: 0.9rem;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    @keyframes slideUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
     @keyframes fadeInUp {
         from {
             opacity: 0;
@@ -1334,7 +1547,7 @@ $preview_data = array_slice($preview_data, 0, 10);
                 <!-- Filter Section -->
                 <div class="filter-section">
                     <h2>Report Filters</h2>
-                    <form method="GET" action="" id="reportForm">
+                    <form method="POST" action="" id="reportForm">
                         <div class="filter-grid">
                             <div class="filter-group">
                                 <label for="report_type">Report Type</label>
@@ -1570,6 +1783,51 @@ $preview_data = array_slice($preview_data, 0, 10);
         </div>
     </div>
 
+    <!-- Security Verification Modal -->
+    <?php if ($show_verification_modal): ?>
+    <div class="modal-overlay" id="verificationModal">
+        <div class="modal-container">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+            </div>
+            <h2 class="modal-title">Secure Export Required</h2>
+            <p class="modal-subtitle">
+                You are about to export sensitive report data.<br>
+                Please verify your identity to continue.
+            </p>
+            
+            <?php if (isset($verification_error)): ?>
+                <div class="modal-error">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <?php echo $verification_error; ?>
+                </div>
+            <?php endif; ?>
+            
+            <form method="POST" action="" class="modal-form">
+                <div class="form-group">
+                    <label for="password">Enter Your Password to Continue</label>
+                    <input type="password" class="form-control" id="password" name="password" 
+                           placeholder="••••••••" required autofocus>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn secondary" onclick="cancelExport()">Cancel</button>
+                    <button type="submit" name="verify_export" class="modal-btn primary">Verify & Export</button>
+                </div>
+            </form>
+            <p style="text-align: center; margin-top: 20px; font-size: 0.8rem; color: #78909c;">
+                This helps us maintain confidentiality of sensitive data
+            </p>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <script>
         // Sidebar toggle
         const sidebar = document.querySelector('.sidebar');
@@ -1591,6 +1849,11 @@ $preview_data = array_slice($preview_data, 0, 10);
             document.getElementById('search').value = '';
             document.getElementById('full').checked = true;
             document.getElementById('reportForm').submit();
+        }
+
+        // Cancel export
+        function cancelExport() {
+            window.location.href = window.location.pathname;
         }
 
         // Initialize charts
@@ -1744,6 +2007,11 @@ $preview_data = array_slice($preview_data, 0, 10);
                 alert('Date From cannot be later than Date To');
             }
         });
+
+        // Prevent background scrolling when modal is open
+        <?php if ($show_verification_modal): ?>
+        document.body.style.overflow = 'hidden';
+        <?php endif; ?>
     </script>
 </body>
 </html>
