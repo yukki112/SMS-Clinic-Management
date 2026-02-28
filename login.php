@@ -948,7 +948,14 @@ if (isset($_SESSION['temp_user_id']) && isset($_SESSION['login_step']) && $_SESS
                 </div>
             <?php endif; ?>
 
-          
+            <div class="role-hint">
+                <p>authorized personnel only</p>
+                <div class="role-badges">
+                    <span class="role-badge">admin</span>
+                    <span class="role-badge">superadmin</span>
+                    <span class="role-badge">nurse</span>
+                </div>
+            </div>
         </div>
     </div>
 </body>
