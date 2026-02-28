@@ -14,15 +14,20 @@ $db = $database->getConnection();
 // Get real statistics from database
 $stats = [];
 
-// Total patients (students)
-$query = "SELECT COUNT(DISTINCT student_id) as total FROM clearance_requests 
-          UNION ALL 
-          SELECT COUNT(DISTINCT student_id) FROM incidents
-          UNION ALL
-          SELECT COUNT(DISTINCT student_id) FROM visit_history";
+// Total unique students across all tables
+$query = "SELECT COUNT(DISTINCT student_id) as total FROM clearance_requests";
 $stmt = $db->query($query);
-$results = $stmt->fetchAll(PDO::FETCH_COLUMN);
-$stats['patients'] = max($results); // Unique students across all tables
+$clearance_students = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+$query = "SELECT COUNT(DISTINCT student_id) as total FROM incidents";
+$stmt = $db->query($query);
+$incident_students = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+$query = "SELECT COUNT(DISTINCT student_id) as total FROM visit_history";
+$stmt = $db->query($query);
+$visit_students = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+$stats['patients'] = max($clearance_students, $incident_students, $visit_students);
 
 // Today's appointments/visits
 $query = "SELECT COUNT(*) as total FROM visit_history WHERE visit_date = CURDATE()";
@@ -55,7 +60,7 @@ $query = "SELECT COUNT(*) as total FROM incidents WHERE incident_date = CURDATE(
 $stmt = $db->query($query);
 $stats['today_incidents'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Recent appointments (from visit_history)
+// Recent visits from visit_history
 $query = "SELECT v.*, u.full_name as doctor_name 
           FROM visit_history v 
           LEFT JOIN users u ON v.attended_by = u.id 
@@ -64,7 +69,7 @@ $query = "SELECT v.*, u.full_name as doctor_name
 $stmt = $db->query($query);
 $recent_visits = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Weekly activity data
+// Weekly activity data from visit_history
 $query = "SELECT 
             DAYNAME(visit_date) as day,
             COUNT(*) as count
@@ -102,18 +107,18 @@ foreach ($all_days as $day) {
 $counts = $filled_counts;
 $days = $all_days;
 
-// Get recent activity for AI analysis
-$query = "SELECT 'visit' as type, v.student_name, v.visit_date, v.visit_time, v.complaint 
-          FROM visit_history v 
-          WHERE v.visit_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+// Get recent activity for AI analysis - FIXED COLUMN NAMES
+$query = "SELECT 'visit' as type, student_name, visit_date, visit_time, complaint 
+          FROM visit_history 
+          WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
           UNION ALL
-          SELECT 'incident' as type, i.student_name, i.incident_date, i.incident_time, i.description 
-          FROM incidents i 
-          WHERE i.incident_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+          SELECT 'incident' as type, student_name, incident_date, incident_time, description 
+          FROM incidents 
+          WHERE incident_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
           UNION ALL
-          SELECT 'clearance' as type, c.student_name, c.request_date, NULL, c.purpose 
-          FROM clearance_requests c 
-          WHERE c.request_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+          SELECT 'clearance' as type, student_name, request_date, NULL, purpose 
+          FROM clearance_requests 
+          WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
           ORDER BY visit_date DESC, visit_time DESC
           LIMIT 10";
 $stmt = $db->query($query);
@@ -138,6 +143,8 @@ $trends['visit_change'] = $visit_trend['last_week'] > 0
 $query = "SELECT complaint, COUNT(*) as count 
           FROM visit_history 
           WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+          AND complaint IS NOT NULL 
+          AND complaint != ''
           GROUP BY complaint 
           ORDER BY count DESC 
           LIMIT 3";
@@ -165,6 +172,7 @@ $query = "SELECT
             COUNT(*) as count
           FROM visit_history
           WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+          AND visit_time IS NOT NULL
           GROUP BY time_slot
           ORDER BY count DESC";
 $stmt = $db->query($query);
@@ -182,15 +190,24 @@ $approval_rate = $clearance_stats['total'] > 0
     ? round(($clearance_stats['approved'] / $clearance_stats['total']) * 100, 1)
     : 0;
 
-// Stock prediction (items that will run out soon)
-$query = "SELECT item_name, quantity, minimum_stock, 
-          ROUND(quantity / NULLIF((SELECT AVG(quantity) FROM dispensing_log WHERE item_name = clinic_stock.item_name AND dispensed_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)), 0)) as days_remaining
-          FROM clinic_stock 
-          WHERE quantity <= minimum_stock * 2
-          ORDER BY quantity ASC 
+// Stock prediction (items that will run out soon) - FIXED SUBQUERY
+$query = "SELECT cs.item_name, cs.quantity, cs.minimum_stock,
+          ROUND(cs.quantity / NULLIF((SELECT AVG(quantity) FROM dispensing_log dl WHERE dl.item_name = cs.item_name AND dl.dispensed_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)), 0)) as days_remaining
+          FROM clinic_stock cs
+          WHERE cs.quantity <= cs.minimum_stock * 2
+          ORDER BY cs.quantity ASC 
           LIMIT 5";
 $stmt = $db->query($query);
 $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Incident types analysis
+$query = "SELECT incident_type, COUNT(*) as count 
+          FROM incidents 
+          WHERE incident_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+          GROUP BY incident_type 
+          ORDER BY count DESC";
+$stmt = $db->query($query);
+$incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -459,6 +476,33 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
             border-left: 3px solid #191970;
         }
 
+        .badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .badge-warning {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .badge-success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .badge-info {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+
+        .badge-danger {
+            background: #ffebee;
+            color: #c62828;
+        }
+
         /* Analytics Section */
         .analytics-section {
             display: grid;
@@ -584,8 +628,21 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
             border-radius: 20px;
             font-size: 0.7rem;
             font-weight: 600;
+        }
+
+        .status-visit {
             background: #e8f5e9;
             color: #2e7d32;
+        }
+
+        .status-incident {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .status-clearance {
+            background: #e3f2fd;
+            color: #1565c0;
         }
 
         .insights-grid {
@@ -622,28 +679,6 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
             font-size: 0.8rem;
             color: #2e7d32;
             border: 1px solid #c8e6c9;
-        }
-
-        .badge {
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.7rem;
-            font-weight: 600;
-        }
-
-        .badge-warning {
-            background: #fff3e0;
-            color: #e65100;
-        }
-
-        .badge-success {
-            background: #e8f5e9;
-            color: #2e7d32;
-        }
-
-        .badge-info {
-            background: #e3f2fd;
-            color: #1565c0;
         }
 
         /* Recent Section */
@@ -1049,7 +1084,7 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <strong>AI Prediction:</strong> 
                             <?php 
                             if (!empty($low_stock_items)) {
-                                echo $low_stock_items[0]['item_name'] . ' will run out soon';
+                                echo htmlspecialchars($low_stock_items[0]['item_name']) . ' will run out soon';
                             } else {
                                 echo 'Stock levels are healthy';
                             }
@@ -1153,23 +1188,44 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     <div class="activity-title">
                                         <?php 
                                         echo htmlspecialchars(substr($activity['student_name'], 0, 20)) . ' - ';
-                                        echo $activity['type'] == 'visit' ? 'Visit' : ($activity['type'] == 'incident' ? 'Incident' : 'Clearance');
+                                        if ($activity['type'] == 'visit') {
+                                            echo 'Visit: ' . htmlspecialchars(substr($activity['complaint'] ?? '', 0, 30));
+                                        } elseif ($activity['type'] == 'incident') {
+                                            echo 'Incident: ' . htmlspecialchars(substr($activity['description'] ?? '', 0, 30));
+                                        } else {
+                                            echo 'Clearance: ' . htmlspecialchars(substr($activity['purpose'] ?? '', 0, 30));
+                                        }
                                         ?>
                                     </div>
                                     <div class="activity-time">
                                         <?php 
-                                        echo date('M d, Y', strtotime($activity['visit_date'] ?? $activity['incident_date'] ?? $activity['request_date']));
+                                        if ($activity['visit_date']) {
+                                            echo date('M d, Y', strtotime($activity['visit_date']));
+                                        } elseif ($activity['incident_date']) {
+                                            echo date('M d, Y', strtotime($activity['incident_date']));
+                                        } else {
+                                            echo date('M d, Y', strtotime($activity['request_date']));
+                                        }
                                         if (!empty($activity['visit_time'])) {
                                             echo ' at ' . date('h:i A', strtotime($activity['visit_time']));
+                                        } elseif (!empty($activity['incident_time'])) {
+                                            echo ' at ' . date('h:i A', strtotime($activity['incident_time']));
                                         }
                                         ?>
                                     </div>
                                 </div>
-                                <span class="activity-status">
+                                <span class="activity-status status-<?php echo $activity['type']; ?>">
                                     <?php echo ucfirst($activity['type']); ?>
                                 </span>
                             </div>
                             <?php endforeach; ?>
+                            <?php if (empty($recent_activities)): ?>
+                            <div class="activity-item">
+                                <div class="activity-content">
+                                    <div class="activity-title">No recent activity</div>
+                                </div>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -1196,12 +1252,37 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     </svg>
                                     Most Common Complaints
                                 </h4>
-                                <?php foreach ($common_complaints as $complaint): ?>
-                                <p>• <?php echo htmlspecialchars($complaint['complaint']); ?> (<?php echo $complaint['count']; ?> cases)</p>
-                                <?php endforeach; ?>
-                                <div class="recommendation">
-                                    <strong>Recommendation:</strong> Stock up on relevant medicines
-                                </div>
+                                <?php if (!empty($common_complaints)): ?>
+                                    <?php foreach ($common_complaints as $complaint): ?>
+                                    <p>• <?php echo htmlspecialchars($complaint['complaint']); ?> (<?php echo $complaint['count']; ?> cases)</p>
+                                    <?php endforeach; ?>
+                                    <div class="recommendation">
+                                        <strong>Recommendation:</strong> Stock up on relevant medicines
+                                    </div>
+                                <?php else: ?>
+                                    <p>No complaint data available</p>
+                                <?php endif; ?>
+                            </div>
+
+                            <!-- Incident Types -->
+                            <div class="insight-item">
+                                <h4>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                        <circle cx="12" cy="12" r="10"/>
+                                        <path d="M12 8v4M12 16h.01"/>
+                                    </svg>
+                                    Incident Types
+                                </h4>
+                                <?php if (!empty($incident_types)): ?>
+                                    <?php foreach ($incident_types as $incident): ?>
+                                    <p>• <?php echo htmlspecialchars($incident['incident_type']); ?>: <?php echo $incident['count']; ?> cases</p>
+                                    <?php endforeach; ?>
+                                    <div class="recommendation">
+                                        <strong>Safety Focus:</strong> Address most common incident types
+                                    </div>
+                                <?php else: ?>
+                                    <p>No incident data available</p>
+                                <?php endif; ?>
                             </div>
 
                             <!-- Peak Hours -->
@@ -1213,29 +1294,16 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     </svg>
                                     Peak Visit Hours
                                 </h4>
-                                <?php foreach ($peak_hours as $hour): ?>
-                                <p>• <?php echo $hour['time_slot']; ?>: <?php echo $hour['count']; ?> visits</p>
-                                <?php endforeach; ?>
-                                <div class="recommendation">
-                                    <strong>Staffing:</strong> Ensure adequate staff during peak hours
-                                </div>
-                            </div>
-
-                            <!-- Medicine Usage -->
-                            <div class="insight-item">
-                                <h4>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                        <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
-                                        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
-                                    </svg>
-                                    Most Used Medicines
-                                </h4>
-                                <?php foreach ($medicine_usage as $medicine): ?>
-                                <p>• <?php echo htmlspecialchars($medicine['item_name']); ?>: <?php echo $medicine['total_used']; ?> units</p>
-                                <?php endforeach; ?>
-                                <div class="recommendation">
-                                    <strong>Prediction:</strong> Order more of these items soon
-                                </div>
+                                <?php if (!empty($peak_hours)): ?>
+                                    <?php foreach ($peak_hours as $hour): ?>
+                                    <p>• <?php echo $hour['time_slot']; ?>: <?php echo $hour['count']; ?> visits</p>
+                                    <?php endforeach; ?>
+                                    <div class="recommendation">
+                                        <strong>Staffing:</strong> Ensure adequate staff during peak hours
+                                    </div>
+                                <?php else: ?>
+                                    <p>No peak hour data available</p>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
@@ -1248,31 +1316,54 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
                                     <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
                                 </svg>
-                                Stock Alerts
+                                Stock Alerts & Medicine Usage
                             </h2>
                         </div>
                         <div class="insights-grid">
-                            <?php if (!empty($low_stock_items)): ?>
-                                <?php foreach ($low_stock_items as $item): ?>
-                                <div class="insight-item">
-                                    <h4><?php echo htmlspecialchars($item['item_name']); ?></h4>
-                                    <p>Current: <?php echo $item['quantity']; ?> units | Min: <?php echo $item['minimum_stock']; ?></p>
-                                    <?php if (isset($item['days_remaining']) && $item['days_remaining'] > 0): ?>
-                                    <p class="badge badge-warning">Estimated <?php echo round($item['days_remaining']); ?> days left</p>
-                                    <?php endif; ?>
+                            <!-- Medicine Usage -->
+                            <div class="insight-item">
+                                <h4>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                        <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+                                        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+                                    </svg>
+                                    Most Used Medicines
+                                </h4>
+                                <?php if (!empty($medicine_usage)): ?>
+                                    <?php foreach ($medicine_usage as $medicine): ?>
+                                    <p>• <?php echo htmlspecialchars($medicine['item_name']); ?>: <?php echo $medicine['total_used']; ?> units</p>
+                                    <?php endforeach; ?>
                                     <div class="recommendation">
-                                        <strong>Action:</strong> Reorder immediately
+                                        <strong>Prediction:</strong> Order more of these items soon
                                     </div>
-                                </div>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <div class="insight-item">
+                                <?php else: ?>
+                                    <p>No medicine usage data available</p>
+                                <?php endif; ?>
+                            </div>
+
+                            <!-- Stock Alerts -->
+                            <div class="insight-item">
+                                <h4>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                        <circle cx="12" cy="12" r="10"/>
+                                        <path d="M12 8v4M12 16h.01"/>
+                                    </svg>
+                                    Low Stock Items
+                                </h4>
+                                <?php if (!empty($low_stock_items)): ?>
+                                    <?php foreach (array_slice($low_stock_items, 0, 3) as $item): ?>
+                                    <p>• <?php echo htmlspecialchars($item['item_name']); ?>: <?php echo $item['quantity']; ?> units left</p>
+                                    <?php endforeach; ?>
+                                    <div class="recommendation">
+                                        <strong>Action:</strong> Reorder soon to avoid shortage
+                                    </div>
+                                <?php else: ?>
                                     <p>All stock levels are healthy</p>
                                     <div class="recommendation">
                                         <strong>Status:</strong> No reorder needed
                                     </div>
-                                </div>
-                            <?php endif; ?>
+                                <?php endif; ?>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1327,6 +1418,11 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
+                                <?php if (empty($recent_visits)): ?>
+                                <tr>
+                                    <td colspan="7" style="text-align: center; padding: 30px;">No recent visits found</td>
+                                </tr>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
@@ -1336,7 +1432,7 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="quick-actions">
                     <h2>Quick Actions</h2>
                     <div class="actions-grid">
-                        <a href="add-patient.php" class="action-card">
+                        <a href="add-student.php" class="action-card">
                             <div class="action-icon">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
                                     <circle cx="12" cy="8" r="4"/>
@@ -1445,8 +1541,6 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Update chart function
         function updateChart(period) {
-            // In a real application, you would fetch new data via AJAX
-            // For now, we'll just update the active button state
             document.querySelectorAll('.period-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
@@ -1454,8 +1548,14 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
             // You could implement AJAX here to fetch different time periods
             if (period === 'month') {
-                // Fetch monthly data
-                console.log('Fetching monthly data...');
+                // Fetch monthly data via AJAX
+                fetch('get_chart_data.php?period=month')
+                    .then(response => response.json())
+                    .then(data => {
+                        visitsChart.data.labels = data.labels;
+                        visitsChart.data.datasets[0].data = data.values;
+                        visitsChart.update();
+                    });
             }
         }
 
@@ -1488,6 +1588,16 @@ $low_stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
             if (Notification.permission === 'granted') {
                 new Notification('Low Stock Alert', {
                     body: '<?php echo $stats['low_stock']; ?> items are running low on stock',
+                    icon: '../assets/images/icon.png'
+                });
+            }
+            <?php endif; ?>
+            
+            <?php if ($stats['pending_clearance'] > 0): ?>
+            // Show notification for pending clearances
+            if (Notification.permission === 'granted') {
+                new Notification('Pending Clearances', {
+                    body: '<?php echo $stats['pending_clearance']; ?> clearance requests need review',
                     icon: '../assets/images/icon.png'
                 });
             }
