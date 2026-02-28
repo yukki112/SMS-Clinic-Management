@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (empty($username) || empty($password)) {
         $error = 'Please enter username/email and password';
     } else {
-        $query = "SELECT * FROM users WHERE (username = :username OR email = :username) AND role IN ('admin', 'superadmin', 'staff', 'doctor')";
+        $query = "SELECT * FROM users WHERE (username = :username OR email = :username) AND role IN ('admin', 'superadmin', 'staff', 'nurse')";
         $stmt = $db->prepare($query);
         $stmt->bindParam(':username', $username);
         $stmt->execute();
@@ -62,8 +62,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 // Redirect based on role
                 if ($user['role'] === 'superadmin') {
                     header('Location: superadmin/dashboard.php');
-                } elseif ($user['role'] === 'doctor') {
-                    header('Location: doctor/dashboard.php');
+                } elseif ($user['role'] === 'nurse') {
+                    header('Location: nurse/dashboard.php');
                 } else {
                     header('Location: admin/dashboard.php');
                 }
@@ -252,6 +252,25 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .forgot-password a:hover {
             text-decoration: underline;
         }
+
+        /* Role badges for demo purposes (optional) */
+        .role-demo {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #cfd8dc;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #90a4ae;
+        }
+
+        .role-demo span {
+            display: inline-block;
+            padding: 4px 8px;
+            margin: 0 4px;
+            border-radius: 4px;
+            background: #eceff1;
+            color: #37474f;
+        }
     </style>
 </head>
 <body>
@@ -291,6 +310,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             </form>
             <div class="auth-link">
                 <p><a href="index.php">← Back to Home</a></p>
+            </div>
+            
+            <!-- Demo role information - you can remove this in production -->
+            <div class="role-demo">
+                <p>Available roles:</p>
+                <div style="margin-top: 8px;">
+                    <span>Admin</span>
+                    <span>Superadmin</span>
+                    <span>Nurse</span>
+                    <span>Staff</span>
+                </div>
             </div>
         </div>
     </div>
