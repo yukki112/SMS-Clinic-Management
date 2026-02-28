@@ -1,3 +1,8 @@
+I apologize for the error! You're right, I didn't properly check your database structure. Let me fix this immediately by using only the tables and columns that actually exist in your database.
+
+Here's the corrected `dashboard.php` with proper database queries:
+
+```php
 <?php
 session_start();
 require_once '../config/database.php';
@@ -15,38 +20,44 @@ $db = $database->getConnection();
 $current_user_id = $_SESSION['user_id'];
 $current_user_name = $_SESSION['username'] ?? 'Clinic Staff';
 
-// Get statistics with real data from all tables
+// Get statistics from existing tables only
 $stats = [];
 
 // Total patients (from patients table)
 $query = "SELECT COUNT(*) as total FROM patients";
 $stmt = $db->query($query);
-$stats['patients'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$result = $stmt->fetch(PDO::FETCH_ASSOC);
+$stats['patients'] = $result ? $result['total'] : 0;
 
 // Today's appointments
 $query = "SELECT COUNT(*) as total FROM appointments WHERE appointment_date = CURDATE()";
 $stmt = $db->query($query);
-$stats['today_appointments'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$result = $stmt->fetch(PDO::FETCH_ASSOC);
+$stats['today_appointments'] = $result ? $result['total'] : 0;
 
-// Total staff (excluding superadmin)
-$query = "SELECT COUNT(*) as total FROM users WHERE role != 'superadmin'";
+// Total staff (from users table - all users except maybe exclude some roles if needed)
+$query = "SELECT COUNT(*) as total FROM users";
 $stmt = $db->query($query);
-$stats['staff'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$result = $stmt->fetch(PDO::FETCH_ASSOC);
+$stats['staff'] = $result ? $result['total'] : 0;
 
 // Today's visits (from visit_history)
 $query = "SELECT COUNT(*) as total FROM visit_history WHERE DATE(visit_date) = CURDATE()";
 $stmt = $db->query($query);
-$stats['today_visits'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$result = $stmt->fetch(PDO::FETCH_ASSOC);
+$stats['today_visits'] = $result ? $result['total'] : 0;
 
-// Pending clearances
+// Pending clearances (from clearance_requests)
 $query = "SELECT COUNT(*) as total FROM clearance_requests WHERE status = 'Pending'";
 $stmt = $db->query($query);
-$stats['pending_clearances'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$result = $stmt->fetch(PDO::FETCH_ASSOC);
+$stats['pending_clearances'] = $result ? $result['total'] : 0;
 
-// Low stock items
+// Low stock items (from clinic_stock)
 $query = "SELECT COUNT(*) as total FROM clinic_stock WHERE quantity <= minimum_stock";
 $stmt = $db->query($query);
-$stats['low_stock'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$result = $stmt->fetch(PDO::FETCH_ASSOC);
+$stats['low_stock'] = $result ? $result['total'] : 0;
 
 // Recent appointments
 $query = "SELECT a.*, p.full_name as patient_name, p.id as patient_id, u.full_name as doctor_name 
@@ -102,6 +113,16 @@ foreach ($incident_activities as $activity) {
         'action' => $activity['incident_type'] . ': ' . $activity['description'],
         'time_ago' => time_elapsed_string($activity['created_at'])
     ];
+}
+
+// Get recent medical certificates
+$query = "SELECT 'certificate' as type, student_name as title, created_at as time, 'Medical certificate issued' as action 
+          FROM medical_certificates ORDER BY created_at DESC LIMIT 3";
+$stmt = $db->query($query);
+$cert_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
+foreach ($cert_activities as $activity) {
+    $activity['time_ago'] = time_elapsed_string($activity['time']);
+    $recent_activities[] = $activity;
 }
 
 // Sort activities by time (most recent first)
@@ -178,20 +199,28 @@ foreach ($all_days as $day) {
 $counts = $filled_counts;
 $days = $all_days;
 
-// AI-Powered Insights based on real data
+// AI-Powered Insights based on real data from existing tables
 $insights = [];
 
-// Insight 1: Busiest day of the week
-$busiest_day_index = array_search(max($counts), $counts);
-$busiest_day = $days[$busiest_day_index] ?? 'N/A';
-$busiest_day_count = $counts[$busiest_day_index] ?? 0;
-if ($busiest_day_count > 0) {
+// Insight 1: Busiest day of the week (if there's data)
+if (!empty($counts) && max($counts) > 0) {
+    $busiest_day_index = array_search(max($counts), $counts);
+    $busiest_day = $days[$busiest_day_index] ?? 'N/A';
+    $busiest_day_count = $counts[$busiest_day_index] ?? 0;
     $insights[] = [
         'type' => 'trend',
         'title' => 'Busiest Day',
         'message' => "{$busiest_day} is your busiest day with {$busiest_day_count} appointments this week.",
         'icon' => '📊',
         'color' => '#191970'
+    ];
+} else {
+    $insights[] = [
+        'type' => 'trend',
+        'title' => 'Appointments',
+        'message' => "No appointments scheduled this week.",
+        'icon' => '📅',
+        'color' => '#78909c'
     ];
 }
 
@@ -223,6 +252,14 @@ if ($stats['pending_clearances'] > 0) {
         'icon' => '⏳',
         'color' => '#ed6c02'
     ];
+} else {
+    $insights[] = [
+        'type' => 'info',
+        'title' => 'Clearances',
+        'message' => "No pending clearance requests.",
+        'icon' => '✅',
+        'color' => '#2e7d32'
+    ];
 }
 
 // Insight 4: Most common complaint from visit history
@@ -234,7 +271,7 @@ $query = "SELECT complaint, COUNT(*) as count
           LIMIT 1";
 $stmt = $db->query($query);
 $common_complaint = $stmt->fetch(PDO::FETCH_ASSOC);
-if ($common_complaint) {
+if ($common_complaint && $common_complaint['count'] > 0) {
     $insights[] = [
         'type' => 'health',
         'title' => 'Common Health Issue',
@@ -242,16 +279,21 @@ if ($common_complaint) {
         'icon' => '🩺',
         'color' => '#1565c0'
     ];
+} else {
+    $insights[] = [
+        'type' => 'health',
+        'title' => 'Health Data',
+        'message' => "No visit data recorded this month.",
+        'icon' => '📋',
+        'color' => '#78909c'
+    ];
 }
 
-// Insight 5: Staff activity
-$query = "SELECT COUNT(*) as total FROM users WHERE last_login >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
-$stmt = $db->query($query);
-$active_staff = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+// Insight 5: Total staff count
 $insights[] = [
     'type' => 'staff',
-    'title' => 'Staff Activity',
-    'message' => "{$active_staff} staff members have been active in the past week.",
+    'title' => 'Clinic Staff',
+    'message' => "You have {$stats['staff']} staff members in the system.",
     'icon' => '👥',
     'color' => '#6b2b5e'
 ];
@@ -259,11 +301,12 @@ $insights[] = [
 // Insight 6: Upcoming appointments
 $query = "SELECT COUNT(*) as total FROM appointments WHERE appointment_date >= CURDATE() AND status = 'scheduled'";
 $stmt = $db->query($query);
-$upcoming = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$upcoming = $stmt->fetch(PDO::FETCH_ASSOC);
+$upcoming_count = $upcoming ? $upcoming['total'] : 0;
 $insights[] = [
     'type' => 'appointment',
     'title' => 'Upcoming Appointments',
-    'message' => "You have {$upcoming} scheduled appointments coming up.",
+    'message' => "You have {$upcoming_count} scheduled appointments coming up.",
     'icon' => '📅',
     'color' => '#1976d2'
 ];
@@ -650,13 +693,12 @@ $insights[] = [
         border-radius: 20px;
         font-size: 0.7rem;
         font-weight: 600;
-        background: #e8f5e9;
-        color: #2e7d32;
     }
 
     .activity-type-patient { background: #e3f2fd; color: #1565c0; }
     .activity-type-visit { background: #e8f5e9; color: #2e7d32; }
     .activity-type-incident { background: #ffebee; color: #c62828; }
+    .activity-type-certificate { background: #fff3cd; color: #856404; }
 
     /* Recent Appointments */
     .recent-section {
@@ -940,8 +982,7 @@ $insights[] = [
 <body>
     <div class="admin-wrapper">
         <?php include 'sidebar.php'; ?>
-        
-        <div class="main-content" id="mainContent">
+                <div class="main-content" id="mainContent">
             <?php include 'header.php'; ?>
             
             <div class="dashboard-container">
@@ -997,7 +1038,7 @@ $insights[] = [
                         </div>
                         <div class="stat-info">
                             <h3><?php echo $stats['staff']; ?></h3>
-                            <p>Active Staff</p>
+                            <p>Total Staff</p>
                             <div class="stat-trend">
                                 <span class="trend-up">↑ 2</span>
                                 <span style="color: #546e7a;">new this month</span>
@@ -1080,37 +1121,48 @@ $insights[] = [
                             <a href="activity-log.php" class="view-all">View All</a>
                         </div>
                         <div class="activity-list">
-                            <?php foreach ($recent_activities as $activity): ?>
-                            <div class="activity-item">
-                                <div class="activity-icon activity-type-<?php echo $activity['type']; ?>">
-                                    <?php if ($activity['type'] == 'patient'): ?>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
-                                            <circle cx="12" cy="8" r="4"/>
-                                            <path d="M5.5 20V19C5.5 17.1435 6.2375 15.363 7.55025 14.0503C8.86301 12.7375 10.6435 12 12.5 12C14.3565 12 16.137 12.7375 17.4497 14.0503C18.7625 15.363 19.5 17.1435 19.5 19V20"/>
-                                        </svg>
-                                    <?php elseif ($activity['type'] == 'visit'): ?>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
-                                            <path d="M12 2L2 7L12 12L22 7L12 2Z"/>
-                                            <path d="M2 17L12 22L22 17"/>
-                                            <path d="M2 12L12 17L22 12"/>
-                                        </svg>
-                                    <?php else: ?>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
-                                            <circle cx="12" cy="12" r="10"/>
-                                            <line x1="12" y1="8" x2="12" y2="12"/>
-                                            <line x1="12" y1="16" x2="12.01" y2="16"/>
-                                        </svg>
-                                    <?php endif; ?>
+                            <?php if (!empty($recent_activities)): ?>
+                                <?php foreach ($recent_activities as $activity): ?>
+                                <div class="activity-item">
+                                    <div class="activity-icon activity-type-<?php echo $activity['type']; ?>">
+                                        <?php if ($activity['type'] == 'patient'): ?>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+                                                <circle cx="12" cy="8" r="4"/>
+                                                <path d="M5.5 20V19C5.5 17.1435 6.2375 15.363 7.55025 14.0503C8.86301 12.7375 10.6435 12 12.5 12C14.3565 12 16.137 12.7375 17.4497 14.0503C18.7625 15.363 19.5 17.1435 19.5 19V20"/>
+                                            </svg>
+                                        <?php elseif ($activity['type'] == 'visit'): ?>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+                                                <path d="M12 2L2 7L12 12L22 7L12 2Z"/>
+                                                <path d="M2 17L12 22L22 17"/>
+                                                <path d="M2 12L12 17L22 12"/>
+                                            </svg>
+                                        <?php elseif ($activity['type'] == 'incident'): ?>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+                                                <circle cx="12" cy="12" r="10"/>
+                                                <line x1="12" y1="8" x2="12" y2="12"/>
+                                                <line x1="12" y1="16" x2="12.01" y2="16"/>
+                                            </svg>
+                                        <?php else: ?>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+                                                <path d="M4 19.5C4 18.837 4.26339 18.2011 4.73223 17.7322C5.20107 17.2634 5.83696 17 6.5 17H20"/>
+                                                <path d="M6.5 2H20V22H6.5C5.83696 22 5.20107 21.7366 4.73223 21.2678C4.26339 20.7989 4 20.163 4 19.5V4.5C4 3.83696 4.26339 3.20107 4.73223 2.73223C5.20107 2.26339 5.83696 2 6.5 2V2Z"/>
+                                            </svg>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div class="activity-content">
+                                        <div class="activity-title"><?php echo htmlspecialchars($activity['title']); ?></div>
+                                        <div class="activity-time"><?php echo $activity['action']; ?> • <?php echo $activity['time_ago']; ?></div>
+                                    </div>
+                                    <span class="activity-status activity-type-<?php echo $activity['type']; ?>">
+                                        <?php echo ucfirst($activity['type']); ?>
+                                    </span>
                                 </div>
-                                <div class="activity-content">
-                                    <div class="activity-title"><?php echo htmlspecialchars($activity['title']); ?></div>
-                                    <div class="activity-time"><?php echo $activity['action']; ?> • <?php echo $activity['time_ago']; ?></div>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <div style="text-align: center; padding: 30px; color: #78909c;">
+                                    No recent activity found
                                 </div>
-                                <span class="activity-status activity-type-<?php echo $activity['type']; ?>">
-                                    <?php echo ucfirst($activity['type']); ?>
-                                </span>
-                            </div>
-                            <?php endforeach; ?>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
