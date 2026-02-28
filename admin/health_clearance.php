@@ -111,57 +111,56 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
     }
     
     // APPROVE clearance request
-    if ($_POST['action'] == 'approve_clearance') {
-        try {
-            $clearance_id = $_POST['clearance_id'];
-            $approved_date = date('Y-m-d');
-            
-            $query = "UPDATE clearance_requests 
-                      SET status = 'Approved', 
-                          approved_date = :approved_date, 
-                          approved_by = :approved_by
-                      WHERE id = :id";
-            
-            $stmt = $db->prepare($query);
-            $stmt->bindParam(':status', $_POST['status']);
-            $stmt->bindParam(':approved_date', $approved_date);
-            $stmt->bindParam(':approved_by', $current_user_fullname);
-            $stmt->bindParam(':id', $clearance_id);
-            
-            if ($stmt->execute()) {
-                $success_message = "Clearance approved successfully! PDF is now available.";
-            } else {
-                $error_message = "Error approving clearance.";
-            }
-        } catch (PDOException $e) {
-            $error_message = "Database error: " . $e->getMessage();
+if ($_POST['action'] == 'approve_clearance') {
+    try {
+        $clearance_id = $_POST['clearance_id'];
+        $approved_date = date('Y-m-d');
+        
+        $query = "UPDATE clearance_requests 
+                  SET status = 'Approved', 
+                      approved_date = :approved_date, 
+                      approved_by = :approved_by
+                  WHERE id = :id";
+        
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':approved_date', $approved_date);
+        $stmt->bindParam(':approved_by', $current_user_fullname);
+        $stmt->bindParam(':id', $clearance_id);
+        
+        if ($stmt->execute()) {
+            $success_message = "Clearance approved successfully! PDF is now available.";
+        } else {
+            $error_message = "Error approving clearance.";
         }
+    } catch (PDOException $e) {
+        $error_message = "Database error: " . $e->getMessage();
     }
-    
-    // DECLINE clearance request
-    if ($_POST['action'] == 'decline_clearance') {
-        try {
-            $clearance_id = $_POST['clearance_id'];
-            $remarks = $_POST['decline_remarks'] ?? 'Request declined';
-            
-            $query = "UPDATE clearance_requests 
-                      SET status = 'Not Cleared', 
-                          remarks = :remarks
-                      WHERE id = :id";
-            
-            $stmt = $db->prepare($query);
-            $stmt->bindParam(':remarks', $remarks);
-            $stmt->bindParam(':id', $clearance_id);
-            
-            if ($stmt->execute()) {
-                $success_message = "Clearance request declined.";
-            } else {
-                $error_message = "Error declining clearance.";
-            }
-        } catch (PDOException $e) {
-            $error_message = "Database error: " . $e->getMessage();
+}
+
+// DECLINE clearance request
+if ($_POST['action'] == 'decline_clearance') {
+    try {
+        $clearance_id = $_POST['clearance_id'];
+        $remarks = $_POST['decline_remarks'] ?? 'Request declined';
+        
+        $query = "UPDATE clearance_requests 
+                  SET status = 'Not Cleared', 
+                      remarks = :remarks
+                  WHERE id = :id";
+        
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':remarks', $remarks);
+        $stmt->bindParam(':id', $clearance_id);
+        
+        if ($stmt->execute()) {
+            $success_message = "Clearance request declined.";
+        } else {
+            $error_message = "Error declining clearance.";
         }
+    } catch (PDOException $e) {
+        $error_message = "Database error: " . $e->getMessage();
     }
+}
     
     // Issue medical certificate
     if ($_POST['action'] == 'issue_certificate') {
