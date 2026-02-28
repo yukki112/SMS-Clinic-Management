@@ -153,22 +153,7 @@ $stmt->execute();
 $top_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $chart_data['top_items'] = $top_items;
 
-// 9. Grade Level Distribution from Incidents (alternative)
-$query = "SELECT 
-            grade_section,
-            COUNT(*) as count 
-          FROM incidents 
-          WHERE incident_date BETWEEN :date_from AND :date_to 
-          AND grade_section IS NOT NULL 
-          GROUP BY grade_section 
-          ORDER BY count DESC 
-          LIMIT 5";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':date_from', $date_from);
-$stmt->bindParam(':date_to', $date_to);
-$stmt->execute();
-$grade_distribution = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$chart_data['grade_distribution'] = $grade_distribution;
+
 
 // 10. Clearance Types Distribution
 $query = "SELECT clearance_type, COUNT(*) as count 
