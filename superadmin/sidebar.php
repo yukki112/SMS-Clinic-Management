@@ -48,7 +48,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">Dashboard</span>
-                            <span class="nav-badge">Super</span>
+                            
                         </a>
                     </li>
                    
@@ -83,7 +83,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 </svg>
                             </div>
                             <span class="nav-label">Audit Logs</span>
-                            <span class="nav-badge urgent">Live</span>
+                            
                         </a>
                     </li>
                     <li class="nav-item <?php echo $current_page == 'system_control.php' ? 'active' : ''; ?>">
