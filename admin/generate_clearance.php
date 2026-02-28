@@ -26,129 +26,235 @@ if (!$clearance) {
     die('Clearance request not found');
 }
 
-// Create PDF
+// Only approved clearances can be generated
+if ($clearance['status'] !== 'Approved') {
+    die('Clearance is not approved yet. PDF generation is only available for approved clearances.');
+}
+
+// Create PDF with improved design
 class PDF extends FPDF
 {
     function Header()
     {
-        $this->SetFont('Arial', 'B', 16);
-        $this->Cell(0, 10, 'STUDENT CLEARANCE FORM', 0, 1, 'C');
-        $this->Ln(5);
+        // School Logo Placeholder
+        $this->SetFont('Arial', 'B', 20);
+        $this->SetTextColor(25, 25, 112); // #191970
+        $this->Cell(0, 15, 'ICARE SCHOOL CLINIC', 0, 1, 'C');
         
-        $this->SetFont('Arial', '', 10);
-        $this->Cell(0, 5, 'School Clinic - ICARE', 0, 1, 'C');
-        $this->Ln(5);
+        $this->SetFont('Arial', '', 11);
+        $this->SetTextColor(84, 110, 122); // #546e7a
+        $this->Cell(0, 5, '123 Education Avenue, Quezon City', 0, 1, 'C');
+        $this->Cell(0, 5, 'Tel: (02) 8123-4567 | Email: clinic@icare.edu', 0, 1, 'C');
         
-        $this->SetDrawColor(161, 74, 118);
-        $this->Line(10, 40, 200, 40);
+        $this->Ln(8);
+        
+        // Certificate Title
+        $this->SetFont('Arial', 'B', 24);
+        $this->SetTextColor(25, 25, 112);
+        $this->Cell(0, 15, 'STUDENT CLEARANCE FORM', 0, 1, 'C');
+        
+        $this->SetFont('Arial', 'B', 12);
+        $this->SetTextColor(161, 74, 118); // #A14A76
+        $this->Cell(0, 8, 'OFFICIAL SCHOOL CLINIC DOCUMENT', 0, 1, 'C');
+        
         $this->Ln(10);
+        
+        // Decorative line
+        $this->SetDrawColor(161, 74, 118);
+        $this->SetLineWidth(1);
+        $this->Line(10, $this->GetY(), 200, $this->GetY());
+        $this->Ln(15);
     }
     
     function Footer()
     {
-        $this->SetY(-30);
+        $this->SetY(-35);
+        
+        // Decorative line
+        $this->SetDrawColor(161, 74, 118);
+        $this->SetLineWidth(0.5);
+        $this->Line(10, $this->GetY(), 200, $this->GetY());
+        $this->Ln(5);
+        
         $this->SetFont('Arial', 'I', 8);
-        $this->Cell(0, 5, 'This clearance form is valid only with clinic stamp and signature.', 0, 1, 'C');
-        $this->Cell(0, 5, 'Generated on: ' . date('F d, Y'), 0, 1, 'C');
+        $this->SetTextColor(108, 117, 125);
+        $this->Cell(0, 4, 'This clearance form is valid only with clinic stamp and authorized signature.', 0, 1, 'C');
+        $this->Cell(0, 4, 'Generated on: ' . date('F d, Y') . ' | Control No: ' . $this->control_no, 0, 1, 'C');
+    }
+    
+    function SetControlNo($no) {
+        $this->control_no = $no;
     }
 }
 
 $pdf = new PDF();
+$pdf->SetControlNo($clearance['clearance_code']);
 $pdf->AddPage();
-$pdf->SetFont('Arial', '', 12);
+$pdf->SetMargins(15, 15, 15);
+$pdf->SetAutoPageBreak(true, 40);
 
-// Clearance details
-$pdf->SetFont('Arial', 'B', 14);
-$pdf->Cell(0, 10, 'CLEARANCE REQUEST', 0, 1);
+// Control Number
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->SetTextColor(25, 25, 112);
+$pdf->Cell(0, 8, 'CLEARANCE NO: ' . $clearance['clearance_code'], 0, 1, 'R');
 $pdf->Ln(5);
 
-// Two-column layout for better organization
-$pdf->SetFont('Arial', '', 12);
-$pdf->Cell(45, 10, 'Clearance No:', 0, 0);
-$pdf->SetFont('Arial', 'B', 12);
-$pdf->Cell(100, 10, $clearance['clearance_code'], 0, 0);
+// Student Information Box
+$pdf->SetFillColor(236, 239, 241); // #eceff1
+$pdf->SetDrawColor(25, 25, 112);
+$pdf->SetLineWidth(0.3);
+$pdf->Rect(15, $pdf->GetY(), 180, 40, 'D');
+$pdf->SetXY(20, $pdf->GetY() + 2);
 
-// Status on the right side
+$pdf->SetFont('Arial', 'B', 12);
+$pdf->SetTextColor(25, 25, 112);
+$pdf->Cell(0, 8, 'STUDENT INFORMATION', 0, 1);
+$pdf->SetXY(20, $pdf->GetY());
+
+$pdf->SetFont('Arial', '', 11);
+$pdf->SetTextColor(55, 71, 79); // #37474f
+
+// Two-column layout for student info
 $pdf->SetFont('Arial', 'B', 10);
-$status_text = 'Status: ' . $clearance['status'];
-$status_color = match($clearance['status']) {
-    'Approved' => [30, 123, 92],
-    'Pending' => [133, 100, 4],
-    'Not Cleared' => [196, 69, 69],
-    default => [108, 117, 125]
-};
-$pdf->SetTextColor($status_color[0], $status_color[1], $status_color[2]);
-$pdf->Cell(0, 10, $status_text, 0, 1, 'R');
-$pdf->SetTextColor(0, 0, 0);
+$pdf->Cell(45, 7, 'Student Name:', 0, 0);
+$pdf->SetFont('Arial', '', 10);
+$pdf->Cell(100, 7, $clearance['student_name'], 0, 0);
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(20, 7, 'ID:', 0, 0);
+$pdf->SetFont('Arial', '', 10);
+$pdf->Cell(0, 7, $clearance['student_id'], 0, 1);
 
-$pdf->SetFont('Arial', '', 12);
-$pdf->Cell(45, 10, 'Student Name:', 0, 0);
-$pdf->SetFont('Arial', 'B', 12);
-$pdf->Cell(0, 10, $clearance['student_name'], 0, 1);
+$pdf->SetX(20);
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(45, 7, 'Grade/Section:', 0, 0);
+$pdf->SetFont('Arial', '', 10);
+$pdf->Cell(0, 7, $clearance['grade_section'], 0, 1);
 
-$pdf->SetFont('Arial', '', 12);
-$pdf->Cell(45, 10, 'Grade/Section:', 0, 0);
-$pdf->SetFont('Arial', 'B', 12);
-$pdf->Cell(0, 10, $clearance['grade_section'], 0, 1);
+$pdf->Ln(5);
 
-$pdf->SetFont('Arial', '', 12);
-$pdf->Cell(45, 10, 'Clearance Type:', 0, 0);
-$pdf->SetFont('Arial', 'B', 12);
-$pdf->Cell(0, 10, $clearance['clearance_type'], 0, 1);
+// Clearance Details Box
+$pdf->SetFillColor(236, 239, 241);
+$pdf->SetDrawColor(25, 25, 112);
+$pdf->Rect(15, $pdf->GetY(), 180, 45, 'D');
+$pdf->SetXY(20, $pdf->GetY() + 2);
 
-$pdf->SetFont('Arial', '', 12);
-$pdf->Cell(45, 10, 'Request Date:', 0, 0);
 $pdf->SetFont('Arial', 'B', 12);
-$pdf->Cell(0, 10, date('F d, Y', strtotime($clearance['request_date'])), 0, 1);
+$pdf->SetTextColor(25, 25, 112);
+$pdf->Cell(0, 8, 'CLEARANCE DETAILS', 0, 1);
+$pdf->SetXY(20, $pdf->GetY());
+
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(45, 7, 'Clearance Type:', 0, 0);
+$pdf->SetFont('Arial', '', 10);
+$pdf->Cell(0, 7, $clearance['clearance_type'], 0, 1);
+
+$pdf->SetX(20);
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(45, 7, 'Request Date:', 0, 0);
+$pdf->SetFont('Arial', '', 10);
+$pdf->Cell(0, 7, date('F d, Y', strtotime($clearance['request_date'])), 0, 1);
+
+$pdf->SetX(20);
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(45, 7, 'Approved Date:', 0, 0);
+$pdf->SetFont('Arial', '', 10);
+$pdf->Cell(0, 7, !empty($clearance['approved_date']) ? date('F d, Y', strtotime($clearance['approved_date'])) : 'N/A', 0, 1);
+
+$pdf->SetX(20);
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(45, 7, 'Valid Until:', 0, 0);
+$pdf->SetFont('Arial', '', 10);
+$valid_until = !empty($clearance['valid_until']) ? date('F d, Y', strtotime($clearance['valid_until'])) : 'No Expiry';
+$pdf->Cell(0, 7, $valid_until, 0, 1);
 
 $pdf->Ln(10);
 
+// Purpose Section
 $pdf->SetFont('Arial', 'B', 12);
-$pdf->Cell(0, 10, 'Purpose:', 0, 1);
-$pdf->SetFont('Arial', '', 12);
-$pdf->MultiCell(0, 8, $clearance['purpose'], 0, 1);
+$pdf->SetTextColor(25, 25, 112);
+$pdf->Cell(0, 8, 'PURPOSE', 0, 1);
+$pdf->SetFont('Arial', '', 11);
+$pdf->SetTextColor(55, 71, 79);
+$pdf->MultiCell(0, 7, $clearance['purpose'], 0, 1);
+$pdf->Ln(5);
 
-$pdf->Ln(10);
+// Approval Box
+$pdf->SetFillColor(236, 239, 241);
+$pdf->SetDrawColor(25, 25, 112);
+$pdf->Rect(15, $pdf->GetY(), 180, 35, 'D');
+$pdf->SetXY(20, $pdf->GetY() + 2);
 
-// Approval details
-if (!empty($clearance['approved_date'])) {
-    $pdf->SetFont('Arial', '', 12);
-    $pdf->Cell(45, 10, 'Approved Date:', 0, 0);
-    $pdf->SetFont('Arial', 'B', 12);
-    $pdf->Cell(0, 10, date('F d, Y', strtotime($clearance['approved_date'])), 0, 1);
-}
+$pdf->SetFont('Arial', 'B', 12);
+$pdf->SetTextColor(25, 25, 112);
+$pdf->Cell(0, 8, 'APPROVAL', 0, 1);
+$pdf->SetXY(20, $pdf->GetY());
 
-if (!empty($clearance['approved_by'])) {
-    $pdf->Cell(45, 10, 'Approved By:', 0, 0);
-    $pdf->SetFont('Arial', 'B', 12);
-    $pdf->Cell(0, 10, $clearance['approved_by'], 0, 1);
-}
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(45, 7, 'Status:', 0, 0);
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->SetTextColor(46, 125, 50); // Green for Approved
+$pdf->Cell(0, 7, strtoupper($clearance['status']), 0, 1);
 
-if (!empty($clearance['valid_until'])) {
-    $pdf->Cell(45, 10, 'Valid Until:', 0, 0);
-    $pdf->SetFont('Arial', 'B', 12);
-    $pdf->Cell(0, 10, date('F d, Y', strtotime($clearance['valid_until'])), 0, 1);
-}
+$pdf->SetTextColor(55, 71, 79);
+$pdf->SetX(20);
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(45, 7, 'Approved By:', 0, 0);
+$pdf->SetFont('Arial', '', 10);
+$pdf->Cell(0, 7, $clearance['approved_by'] ?: 'N/A', 0, 1);
 
 if (!empty($clearance['remarks'])) {
-    $pdf->Ln(10);
-    $pdf->SetFont('Arial', 'B', 12);
-    $pdf->Cell(0, 10, 'Remarks:', 0, 1);
-    $pdf->SetFont('Arial', '', 12);
-    $pdf->MultiCell(0, 8, $clearance['remarks'], 0, 1);
+    $pdf->Ln(5);
+    $pdf->SetFont('Arial', 'B', 11);
+    $pdf->SetTextColor(25, 25, 112);
+    $pdf->Cell(0, 8, 'REMARKS:', 0, 1);
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->SetTextColor(55, 71, 79);
+    $pdf->MultiCell(0, 6, $clearance['remarks'], 0, 1);
 }
 
-$pdf->Ln(20);
+$pdf->Ln(15);
 
-// Signature lines
-$pdf->Cell(100, 10, '_________________________', 0, 0);
-$pdf->Cell(90, 10, '_________________________', 0, 1);
+// Certification Statement
+$pdf->SetFont('Arial', 'I', 10);
+$pdf->SetTextColor(84, 110, 122);
+$pdf->MultiCell(0, 5, 'This certifies that the above-named student has complied with the school clinic requirements and is cleared for the stated purpose, subject to any restrictions noted above.', 0, 1, 'C');
+$pdf->Ln(10);
 
-$pdf->Cell(100, 5, 'Student Signature', 0, 0);
-$pdf->Cell(90, 5, 'Clinic Staff Signature', 0, 1);
+// Signature Lines
+$pdf->SetFont('Arial', '', 10);
+
+// Left side - Student Signature
+$pdf->Cell(90, 5, '_________________________', 0, 0, 'C');
+$pdf->Cell(90, 5, '_________________________', 0, 1, 'C');
+
+$pdf->Cell(90, 5, 'Student Signature', 0, 0, 'C');
+$pdf->Cell(90, 5, 'Clinic Staff Signature', 0, 1, 'C');
+
+$pdf->Ln(5);
+
+// Right side - Clinic Stamp Area
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->SetTextColor(25, 25, 112);
+$pdf->Cell(90, 5, '', 0, 0);
+$pdf->Cell(90, 5, '_________________________', 0, 1, 'C');
+$pdf->Cell(90, 5, '', 0, 0);
+$pdf->Cell(90, 5, $clearance['approved_by'] ?: 'Clinic Head', 0, 1, 'C');
+$pdf->Cell(90, 5, '', 0, 0);
+$pdf->SetFont('Arial', '', 8);
+$pdf->Cell(90, 5, 'Printed Name & License No.', 0, 1, 'C');
 
 $pdf->Ln(10);
-$pdf->SetFont('Arial', 'I', 10);
-$pdf->Cell(0, 5, 'Requested by: ' . ($clearance['created_by_name'] ?? 'Clinic Staff'), 0, 1);
+
+// Stamp placeholder
+$pdf->SetDrawColor(161, 74, 118);
+$pdf->SetLineWidth(0.5);
+$pdf->Rect(150, $pdf->GetY() - 5, 40, 20);
+$pdf->SetXY(152, $pdf->GetY() - 3);
+$pdf->SetFont('Arial', 'B', 8);
+$pdf->SetTextColor(161, 74, 118);
+$pdf->Cell(36, 5, 'CLINIC STAMP', 0, 1, 'C');
+$pdf->SetXY(152, $pdf->GetY() + 5);
+$pdf->Cell(36, 5, '(Official Seal)', 0, 1, 'C');
 
 $pdf->Output('I', 'Clearance_' . $clearance['clearance_code'] . '.pdf');
+?>
