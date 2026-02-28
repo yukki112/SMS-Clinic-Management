@@ -9,39 +9,51 @@ use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
 // Redirect if already logged in
-if (isset($_SESSION['user_id']) && !isset($_SESSION['otp_verified'])) {
+if (isset($_SESSION['user_id']) && isset($_SESSION['otp_verified'])) {
     if ($_SESSION['role'] === 'superadmin') {
         header('Location: superadmin/dashboard.php');
+        exit();
     } elseif ($_SESSION['role'] === 'nurse') {
         header('Location: nurse/dashboard.php');
+        exit();
     } elseif (in_array($_SESSION['role'], ['admin', 'staff'])) {
         header('Location: admin/dashboard.php');
+        exit();
     }
-    exit();
 }
 
 $error = '';
-$step = isset($_SESSION['login_step']) ? $_SESSION['login_step'] : 'credentials';
+$success = '';
+
+// Function to mask email for display
+function maskEmail($email) {
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return $email;
+    
+    $parts = explode('@', $email);
+    $name = $parts[0];
+    $domain = $parts[1];
+    
+    $maskedName = substr($name, 0, 2) . str_repeat('*', max(0, strlen($name) - 3));
+    
+    return $maskedName . '@' . $domain;
+}
 
 // Function to send OTP via email
 function sendOTPEmail($email, $otp, $full_name) {
     $mail = new PHPMailer(true);
     
     try {
-        
         $mail->isSMTP();
-        $mail->Host       = 'smtp.gmail.com'; // Use your SMTP server
+        $mail->Host       = 'smtp.gmail.com';
         $mail->SMTPAuth   = true;
-        $mail->Username   = 'Stephenviray12@gmail.com'; // Your email
-        $mail->Password   = 'bubr nckn tgqf lvus'; // Your app password
+        $mail->Username   = 'Stephenviray12@gmail.com';
+        $mail->Password   = 'bubr nckn tgqf lvus';
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
         
-        // Recipients
-        $mail->setFrom('your-email@gmail.com', 'ICARE Clinic');
+        $mail->setFrom('Stephenviray12@gmail.com', 'ICARE Clinic');
         $mail->addAddress($email, $full_name);
         
-        // Content
         $mail->isHTML(true);
         $mail->Subject = 'Your OTP for ICARE Clinic Login';
         $mail->Body    = "
@@ -82,10 +94,18 @@ function generateOTP() {
     return sprintf("%06d", mt_rand(1, 999999));
 }
 
+// Initialize database connection
+$database = new Database();
+$db = $database->getConnection();
+
+// Check if we're in OTP step
+$showOTPForm = false;
+if (isset($_SESSION['temp_user_id']) && isset($_SESSION['login_step']) && $_SESSION['login_step'] === 'otp') {
+    $showOTPForm = true;
+}
+
 // Handle login form submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $database = new Database();
-    $db = $database->getConnection();
     
     if (isset($_POST['login'])) {
         // Step 1: Validate credentials
@@ -133,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $_SESSION['login_step'] = 'otp';
                             $_SESSION['otp_expiry'] = $expires_at;
                             
-                            // Redirect to OTP page (or stay on same page with OTP form)
+                            // Redirect to clear POST data and show OTP form
                             header('Location: login.php?otp_sent=1');
                             exit();
                         } else {
@@ -155,6 +175,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         
         if (empty($otp_code)) {
             $error = 'Please enter the OTP code';
+        } elseif (!isset($_SESSION['temp_user_id'])) {
+            $error = 'Session expired. Please login again.';
+            // Clear any partial session
+            session_destroy();
+            session_start();
+            header('Location: login.php');
+            exit();
         } else {
             $user_id = $_SESSION['temp_user_id'];
             $current_time = date('Y-m-d H:i:s');
@@ -246,6 +273,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     } elseif (isset($_POST['resend_otp'])) {
         // Resend OTP
+        if (!isset($_SESSION['temp_user_id'])) {
+            $error = 'Session expired. Please login again.';
+            header('Location: login.php');
+            exit();
+        }
+        
         $user_id = $_SESSION['temp_user_id'];
         
         // Get user details
@@ -287,6 +320,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
         }
     }
+}
+
+// Check for OTP sent flag in URL
+if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
+    $showOTPForm = true;
 }
 ?>
 <!DOCTYPE html>
@@ -722,7 +760,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             </div>
 
             <div class="auth-header">
-                <?php if (isset($_SESSION['login_step']) && $_SESSION['login_step'] == 'otp'): ?>
+                <?php if ($showOTPForm): ?>
                     <h2>Verify OTP</h2>
                     <p>Enter the code sent to your email</p>
                 <?php else: ?>
@@ -744,7 +782,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 </div>
             <?php endif; ?>
             
-            <?php if (isset($success)): ?>
+            <?php if ($success): ?>
                 <div class="alert alert-success">
                     <i class="fas fa-check-circle"></i>
                     <?php echo htmlspecialchars($success); ?>
@@ -765,7 +803,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 </div>
             <?php endif; ?>
             
-            <?php if (isset($_SESSION['login_step']) && $_SESSION['login_step'] == 'otp'): ?>
+            <?php if ($showOTPForm): ?>
                 <!-- OTP Verification Form -->
                 <div class="info-text">
                     <i class="fas fa-envelope"></i> 
@@ -809,7 +847,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 </div>
 
                 <div class="back-link">
-                    <a href="login.php"><i class="fas fa-chevron-left"></i> back to login</a>
+                    <a href="logout.php?clear_temp=1"><i class="fas fa-chevron-left"></i> back to login</a>
                 </div>
 
                 <script>
@@ -868,6 +906,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         } else {
                             // If no end time in storage, assume 2 minutes from now
                             startTimer(120, display);
+                            document.getElementById('resendBtn').disabled = true;
                         }
                     };
 
@@ -920,33 +959,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 </div>
             <?php endif; ?>
 
-            <?php
-            // Helper function to mask email
-            function maskEmail($email) {
-                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return $email;
-                
-                $parts = explode('@', $email);
-                $name = $parts[0];
-                $domain = $parts[1];
-                
-                $maskedName = substr($name, 0, 2) . str_repeat('*', strlen($name) - 2);
-                
-                return $maskedName . '@' . $domain;
-            }
-            ?>
-
-          
+         
         </div>
     </div>
-
-    <?php if (isset($_SESSION['login_step']) && $_SESSION['login_step'] == 'otp'): ?>
-    <script>
-        // Clear temporary session data when leaving the page
-        window.addEventListener('beforeunload', function() {
-            // Optionally clear OTP timer from localStorage
-            // localStorage.removeItem('otp_end_time');
-        });
-    </script>
-    <?php endif; ?>
 </body>
 </html>
