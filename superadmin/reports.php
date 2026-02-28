@@ -9,21 +9,20 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'superadmin') {
 }
 
 // Include FPDF library
-require_once '../vendor/setasign/fpdf/fpdf.php';
+require_once '../vendor/fpdf/fpdf.php';
 
 $database = new Database();
 $db = $database->getConnection();
 
-// Get filter parameters
-$report_type = isset($_GET['report_type']) ? $_GET['report_type'] : 'users';
-$date_from = isset($_GET['date_from']) ? $_GET['date_from'] : date('Y-m-d', strtotime('-30 days'));
-$date_to = isset($_GET['date_to']) ? $_GET['date_to'] : date('Y-m-d');
-$export_type = isset($_GET['export_type']) ? $_GET['export_type'] : 'full';
-$export_format = isset($_GET['export_format']) ? $_GET['export_format'] : '';
-$search = isset($_GET['search']) ? $_GET['search'] : '';
+// Get filter parameters - check both GET and POST
+$report_type = isset($_REQUEST['report_type']) ? $_REQUEST['report_type'] : 'summary';
+$date_from = isset($_REQUEST['date_from']) ? $_REQUEST['date_from'] : date('Y-m-d', strtotime('-30 days'));
+$date_to = isset($_REQUEST['date_to']) ? $_REQUEST['date_to'] : date('Y-m-d');
+$export_type = isset($_REQUEST['export_type']) ? $_REQUEST['export_type'] : 'full';
+$search = isset($_REQUEST['search']) ? $_REQUEST['search'] : '';
 
 // Handle export
-if (isset($_GET['export']) && $_GET['export'] == 'pdf' && !empty($export_format)) {
+if (isset($_REQUEST['export']) && $_REQUEST['export'] == 'pdf') {
     exportToPDF($report_type, $date_from, $date_to, $export_type, $search, $db);
     exit();
 }
@@ -59,9 +58,6 @@ function exportToPDF($report_type, $date_from, $date_to, $export_type, $search, 
         case 'patients':
             generatePatientsReport($pdf, $data);
             break;
-        case 'appointments':
-            generateAppointmentsReport($pdf, $data);
-            break;
         case 'incidents':
             generateIncidentsReport($pdf, $data);
             break;
@@ -80,8 +76,17 @@ function exportToPDF($report_type, $date_from, $date_to, $export_type, $search, 
         case 'clinic_stock':
             generateClinicStockReport($pdf, $data);
             break;
+        case 'physical_exams':
+            generatePhysicalExamsReport($pdf, $data);
+            break;
+        case 'medical_certificates':
+            generateMedicalCertificatesReport($pdf, $data);
+            break;
+        case 'emergency_cases':
+            generateEmergencyCasesReport($pdf, $data);
+            break;
         default:
-            generateSummaryReport($pdf, $data, $db);
+            generateSummaryReport($pdf, $data, $db, $date_from, $date_to);
     }
     
     // Output PDF
@@ -115,22 +120,6 @@ function getReportData($report_type, $date_from, $date_to, $export_type, $search
                 $params[':search'] = "%$search%";
             }
             $query .= " ORDER BY created_at DESC";
-            break;
-            
-        case 'appointments':
-            $query = "SELECT a.*, p.full_name as patient_name, u.full_name as doctor_name 
-                      FROM appointments a 
-                      LEFT JOIN patients p ON a.patient_id = p.id 
-                      LEFT JOIN users u ON a.doctor_id = u.id 
-                      WHERE DATE(a.appointment_date) BETWEEN :date_from AND :date_to";
-            $params[':date_from'] = $date_from;
-            $params[':date_to'] = $date_to;
-            
-            if ($export_type == 'partial' && !empty($search)) {
-                $query .= " AND (p.full_name LIKE :search OR u.full_name LIKE :search OR a.reason LIKE :search)";
-                $params[':search'] = "%$search%";
-            }
-            $query .= " ORDER BY a.appointment_date DESC, a.appointment_time DESC";
             break;
             
         case 'incidents':
@@ -218,6 +207,49 @@ function getReportData($report_type, $date_from, $date_to, $export_type, $search
             $query .= " ORDER BY cs.item_name ASC";
             break;
             
+        case 'physical_exams':
+            $query = "SELECT pe.* 
+                      FROM physical_exam_records pe 
+                      WHERE DATE(pe.exam_date) BETWEEN :date_from AND :date_to";
+            $params[':date_from'] = $date_from;
+            $params[':date_to'] = $date_to;
+            
+            if ($export_type == 'partial' && !empty($search)) {
+                $query .= " AND (pe.student_name LIKE :search OR pe.student_id LIKE :search)";
+                $params[':search'] = "%$search%";
+            }
+            $query .= " ORDER BY pe.exam_date DESC";
+            break;
+            
+        case 'medical_certificates':
+            $query = "SELECT mc.* 
+                      FROM medical_certificates mc 
+                      WHERE DATE(mc.issued_date) BETWEEN :date_from AND :date_to";
+            $params[':date_from'] = $date_from;
+            $params[':date_to'] = $date_to;
+            
+            if ($export_type == 'partial' && !empty($search)) {
+                $query .= " AND (mc.student_name LIKE :search OR mc.certificate_code LIKE :search)";
+                $params[':search'] = "%$search%";
+            }
+            $query .= " ORDER BY mc.issued_date DESC";
+            break;
+            
+        case 'emergency_cases':
+            $query = "SELECT ec.*, i.incident_code, i.student_name, i.incident_type 
+                      FROM emergency_cases ec 
+                      LEFT JOIN incidents i ON ec.incident_id = i.id 
+                      WHERE DATE(ec.created_at) BETWEEN :date_from AND :date_to";
+            $params[':date_from'] = $date_from;
+            $params[':date_to'] = $date_to;
+            
+            if ($export_type == 'partial' && !empty($search)) {
+                $query .= " AND (ec.student_id LIKE :search OR i.incident_code LIKE :search)";
+                $params[':search'] = "%$search%";
+            }
+            $query .= " ORDER BY ec.created_at DESC";
+            break;
+            
         default:
             return [];
     }
@@ -240,11 +272,12 @@ function generateUsersReport($pdf, $data) {
     $pdf->SetFont('Arial', 'B', 10);
     $pdf->SetFillColor(25, 25, 112);
     $pdf->SetTextColor(255, 255, 255);
-    $pdf->Cell(30, 8, 'ID', 1, 0, 'C', true);
-    $pdf->Cell(40, 8, 'Username', 1, 0, 'C', true);
-    $pdf->Cell(60, 8, 'Full Name', 1, 0, 'C', true);
-    $pdf->Cell(30, 8, 'Role', 1, 0, 'C', true);
-    $pdf->Cell(40, 8, 'Created At', 1, 1, 'C', true);
+    $pdf->Cell(20, 8, 'ID', 1, 0, 'C', true);
+    $pdf->Cell(35, 8, 'Username', 1, 0, 'C', true);
+    $pdf->Cell(50, 8, 'Full Name', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Role', 1, 0, 'C', true);
+    $pdf->Cell(30, 8, 'Email', 1, 0, 'C', true);
+    $pdf->Cell(30, 8, 'Created', 1, 1, 'C', true);
     
     // Data
     $pdf->SetFont('Arial', '', 8);
@@ -253,11 +286,12 @@ function generateUsersReport($pdf, $data) {
     $fill = false;
     
     foreach ($data as $row) {
-        $pdf->Cell(30, 6, $row['id'], 1, 0, 'C', $fill);
-        $pdf->Cell(40, 6, $row['username'], 1, 0, 'L', $fill);
-        $pdf->Cell(60, 6, substr($row['full_name'], 0, 25), 1, 0, 'L', $fill);
-        $pdf->Cell(30, 6, ucfirst($row['role']), 1, 0, 'L', $fill);
-        $pdf->Cell(40, 6, date('Y-m-d', strtotime($row['created_at'])), 1, 1, 'C', $fill);
+        $pdf->Cell(20, 6, $row['id'], 1, 0, 'C', $fill);
+        $pdf->Cell(35, 6, $row['username'], 1, 0, 'L', $fill);
+        $pdf->Cell(50, 6, substr($row['full_name'], 0, 20), 1, 0, 'L', $fill);
+        $pdf->Cell(25, 6, ucfirst($row['role']), 1, 0, 'L', $fill);
+        $pdf->Cell(30, 6, substr($row['email'], 0, 15), 1, 0, 'L', $fill);
+        $pdf->Cell(30, 6, date('Y-m-d', strtotime($row['created_at'])), 1, 1, 'C', $fill);
         $fill = !$fill;
     }
     
@@ -277,11 +311,12 @@ function generatePatientsReport($pdf, $data) {
     $pdf->SetFillColor(25, 25, 112);
     $pdf->SetTextColor(255, 255, 255);
     $pdf->Cell(30, 8, 'Patient ID', 1, 0, 'C', true);
-    $pdf->Cell(50, 8, 'Full Name', 1, 0, 'C', true);
-    $pdf->Cell(30, 8, 'Gender', 1, 0, 'C', true);
-    $pdf->Cell(25, 8, 'Blood', 1, 0, 'C', true);
-    $pdf->Cell(40, 8, 'Phone', 1, 0, 'C', true);
-    $pdf->Cell(25, 8, 'Created', 1, 1, 'C', true);
+    $pdf->Cell(45, 8, 'Full Name', 1, 0, 'C', true);
+    $pdf->Cell(20, 8, 'Gender', 1, 0, 'C', true);
+    $pdf->Cell(20, 8, 'Blood', 1, 0, 'C', true);
+    $pdf->Cell(35, 8, 'Phone', 1, 0, 'C', true);
+    $pdf->Cell(30, 8, 'Birth Date', 1, 0, 'C', true);
+    $pdf->Cell(20, 8, 'Created', 1, 1, 'C', true);
     
     // Data
     $pdf->SetFont('Arial', '', 8);
@@ -291,65 +326,18 @@ function generatePatientsReport($pdf, $data) {
     
     foreach ($data as $row) {
         $pdf->Cell(30, 6, $row['patient_id'], 1, 0, 'C', $fill);
-        $pdf->Cell(50, 6, substr($row['full_name'], 0, 20), 1, 0, 'L', $fill);
-        $pdf->Cell(30, 6, $row['gender'] ?? 'N/A', 1, 0, 'L', $fill);
-        $pdf->Cell(25, 6, $row['blood_group'] ?? 'N/A', 1, 0, 'C', $fill);
-        $pdf->Cell(40, 6, $row['phone'] ?? 'N/A', 1, 0, 'L', $fill);
-        $pdf->Cell(25, 6, date('Y-m-d', strtotime($row['created_at'])), 1, 1, 'C', $fill);
+        $pdf->Cell(45, 6, substr($row['full_name'], 0, 18), 1, 0, 'L', $fill);
+        $pdf->Cell(20, 6, $row['gender'] ?? 'N/A', 1, 0, 'L', $fill);
+        $pdf->Cell(20, 6, $row['blood_group'] ?? 'N/A', 1, 0, 'C', $fill);
+        $pdf->Cell(35, 6, $row['phone'] ?? 'N/A', 1, 0, 'L', $fill);
+        $pdf->Cell(30, 6, $row['date_of_birth'] ?? 'N/A', 1, 0, 'C', $fill);
+        $pdf->Cell(20, 6, date('Y-m-d', strtotime($row['created_at'])), 1, 1, 'C', $fill);
         $fill = !$fill;
     }
     
     $pdf->Ln(10);
     $pdf->SetFont('Arial', 'B', 10);
     $pdf->Cell(0, 6, 'Total Patients: ' . count($data), 0, 1);
-}
-
-function generateAppointmentsReport($pdf, $data) {
-    $pdf->SetFont('Arial', 'B', 14);
-    $pdf->Cell(0, 10, 'Appointments Report', 0, 1, 'L');
-    $pdf->Ln(5);
-    
-    // Headers
-    $pdf->SetFont('Arial', 'B', 10);
-    $pdf->SetFillColor(25, 25, 112);
-    $pdf->SetTextColor(255, 255, 255);
-    $pdf->Cell(40, 8, 'Patient', 1, 0, 'C', true);
-    $pdf->Cell(40, 8, 'Doctor', 1, 0, 'C', true);
-    $pdf->Cell(30, 8, 'Date', 1, 0, 'C', true);
-    $pdf->Cell(25, 8, 'Time', 1, 0, 'C', true);
-    $pdf->Cell(30, 8, 'Status', 1, 0, 'C', true);
-    $pdf->Cell(35, 8, 'Reason', 1, 1, 'C', true);
-    
-    // Data
-    $pdf->SetFont('Arial', '', 8);
-    $pdf->SetTextColor(0, 0, 0);
-    $pdf->SetFillColor(245, 245, 245);
-    $fill = false;
-    
-    foreach ($data as $row) {
-        $pdf->Cell(40, 6, substr($row['patient_name'] ?? 'N/A', 0, 15), 1, 0, 'L', $fill);
-        $pdf->Cell(40, 6, substr($row['doctor_name'] ?? 'N/A', 0, 15), 1, 0, 'L', $fill);
-        $pdf->Cell(30, 6, date('Y-m-d', strtotime($row['appointment_date'])), 1, 0, 'C', $fill);
-        $pdf->Cell(25, 6, date('H:i', strtotime($row['appointment_time'])), 1, 0, 'C', $fill);
-        $pdf->Cell(30, 6, ucfirst($row['status']), 1, 0, 'L', $fill);
-        $pdf->Cell(35, 6, substr($row['reason'] ?? '', 0, 15), 1, 1, 'L', $fill);
-        $fill = !$fill;
-    }
-    
-    // Status summary
-    $scheduled = 0; $completed = 0; $cancelled = 0;
-    foreach ($data as $row) {
-        switch ($row['status']) {
-            case 'scheduled': $scheduled++; break;
-            case 'completed': $completed++; break;
-            case 'cancelled': $cancelled++; break;
-        }
-    }
-    
-    $pdf->Ln(10);
-    $pdf->SetFont('Arial', 'B', 10);
-    $pdf->Cell(0, 6, 'Total Appointments: ' . count($data), 0, 1);
-    $pdf->Cell(0, 6, 'Scheduled: ' . $scheduled . ' | Completed: ' . $completed . ' | Cancelled: ' . $cancelled, 0, 1);
 }
 
 function generateIncidentsReport($pdf, $data) {
@@ -361,12 +349,12 @@ function generateIncidentsReport($pdf, $data) {
     $pdf->SetFont('Arial', 'B', 10);
     $pdf->SetFillColor(25, 25, 112);
     $pdf->SetTextColor(255, 255, 255);
-    $pdf->Cell(30, 8, 'Code', 1, 0, 'C', true);
-    $pdf->Cell(40, 8, 'Student', 1, 0, 'C', true);
-    $pdf->Cell(30, 8, 'Date', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Code', 1, 0, 'C', true);
+    $pdf->Cell(35, 8, 'Student', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Date', 1, 0, 'C', true);
     $pdf->Cell(25, 8, 'Type', 1, 0, 'C', true);
-    $pdf->Cell(35, 8, 'Location', 1, 0, 'C', true);
-    $pdf->Cell(40, 8, 'Description', 1, 1, 'C', true);
+    $pdf->Cell(30, 8, 'Location', 1, 0, 'C', true);
+    $pdf->Cell(50, 8, 'Description', 1, 1, 'C', true);
     
     // Data
     $pdf->SetFont('Arial', '', 7);
@@ -375,12 +363,12 @@ function generateIncidentsReport($pdf, $data) {
     $fill = false;
     
     foreach ($data as $row) {
-        $pdf->Cell(30, 6, $row['incident_code'], 1, 0, 'C', $fill);
-        $pdf->Cell(40, 6, substr($row['student_name'], 0, 15), 1, 0, 'L', $fill);
-        $pdf->Cell(30, 6, date('Y-m-d', strtotime($row['incident_date'])), 1, 0, 'C', $fill);
+        $pdf->Cell(25, 6, $row['incident_code'], 1, 0, 'C', $fill);
+        $pdf->Cell(35, 6, substr($row['student_name'], 0, 15), 1, 0, 'L', $fill);
+        $pdf->Cell(25, 6, date('Y-m-d', strtotime($row['incident_date'])), 1, 0, 'C', $fill);
         $pdf->Cell(25, 6, substr($row['incident_type'], 0, 10), 1, 0, 'L', $fill);
-        $pdf->Cell(35, 6, substr($row['location'], 0, 15), 1, 0, 'L', $fill);
-        $pdf->Cell(40, 6, substr($row['description'], 0, 20), 1, 1, 'L', $fill);
+        $pdf->Cell(30, 6, substr($row['location'], 0, 12), 1, 0, 'L', $fill);
+        $pdf->Cell(50, 6, substr($row['description'], 0, 25), 1, 1, 'L', $fill);
         $fill = !$fill;
     }
     
@@ -410,8 +398,8 @@ function generateMedicineDispensedReport($pdf, $data) {
     $pdf->SetFillColor(25, 25, 112);
     $pdf->SetTextColor(255, 255, 255);
     $pdf->Cell(35, 8, 'Student', 1, 0, 'C', true);
-    $pdf->Cell(40, 8, 'Item Name', 1, 0, 'C', true);
-    $pdf->Cell(20, 8, 'Qty', 1, 0, 'C', true);
+    $pdf->Cell(35, 8, 'Item Name', 1, 0, 'C', true);
+    $pdf->Cell(15, 8, 'Qty', 1, 0, 'C', true);
     $pdf->Cell(20, 8, 'Unit', 1, 0, 'C', true);
     $pdf->Cell(35, 8, 'Dispensed By', 1, 0, 'C', true);
     $pdf->Cell(40, 8, 'Date/Time', 1, 1, 'C', true);
@@ -426,8 +414,8 @@ function generateMedicineDispensedReport($pdf, $data) {
     
     foreach ($data as $row) {
         $pdf->Cell(35, 6, substr($row['student_name'], 0, 15), 1, 0, 'L', $fill);
-        $pdf->Cell(40, 6, substr($row['item_name'], 0, 15), 1, 0, 'L', $fill);
-        $pdf->Cell(20, 6, $row['quantity'], 1, 0, 'C', $fill);
+        $pdf->Cell(35, 6, substr($row['item_name'], 0, 15), 1, 0, 'L', $fill);
+        $pdf->Cell(15, 6, $row['quantity'], 1, 0, 'C', $fill);
         $pdf->Cell(20, 6, $row['unit'], 1, 0, 'C', $fill);
         $pdf->Cell(35, 6, substr($row['dispensed_by_name'] ?? 'N/A', 0, 12), 1, 0, 'L', $fill);
         $pdf->Cell(40, 6, date('Y-m-d H:i', strtotime($row['dispensed_date'])), 1, 1, 'C', $fill);
@@ -450,13 +438,14 @@ function generateMedicineRequestsReport($pdf, $data) {
     $pdf->SetFont('Arial', 'B', 10);
     $pdf->SetFillColor(25, 25, 112);
     $pdf->SetTextColor(255, 255, 255);
-    $pdf->Cell(30, 8, 'Code', 1, 0, 'C', true);
-    $pdf->Cell(35, 8, 'Item Name', 1, 0, 'C', true);
-    $pdf->Cell(20, 8, 'Qty Req', 1, 0, 'C', true);
-    $pdf->Cell(20, 8, 'Qty App', 1, 0, 'C', true);
-    $pdf->Cell(25, 8, 'Category', 1, 0, 'C', true);
-    $pdf->Cell(25, 8, 'Urgency', 1, 0, 'C', true);
-    $pdf->Cell(25, 8, 'Status', 1, 1, 'C', true);
+    $pdf->Cell(25, 8, 'Code', 1, 0, 'C', true);
+    $pdf->Cell(30, 8, 'Item Name', 1, 0, 'C', true);
+    $pdf->Cell(15, 8, 'Req Qty', 1, 0, 'C', true);
+    $pdf->Cell(15, 8, 'App Qty', 1, 0, 'C', true);
+    $pdf->Cell(20, 8, 'Category', 1, 0, 'C', true);
+    $pdf->Cell(20, 8, 'Urgency', 1, 0, 'C', true);
+    $pdf->Cell(20, 8, 'Status', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Requested By', 1, 1, 'C', true);
     
     // Data
     $pdf->SetFont('Arial', '', 7);
@@ -465,13 +454,14 @@ function generateMedicineRequestsReport($pdf, $data) {
     $fill = false;
     
     foreach ($data as $row) {
-        $pdf->Cell(30, 6, $row['request_code'], 1, 0, 'C', $fill);
-        $pdf->Cell(35, 6, substr($row['item_name'], 0, 12), 1, 0, 'L', $fill);
-        $pdf->Cell(20, 6, $row['quantity_requested'], 1, 0, 'C', $fill);
-        $pdf->Cell(20, 6, $row['quantity_approved'] ?? '0', 1, 0, 'C', $fill);
-        $pdf->Cell(25, 6, $row['category'], 1, 0, 'L', $fill);
-        $pdf->Cell(25, 6, ucfirst($row['urgency']), 1, 0, 'L', $fill);
-        $pdf->Cell(25, 6, ucfirst($row['status']), 1, 1, 'L', $fill);
+        $pdf->Cell(25, 6, $row['request_code'], 1, 0, 'C', $fill);
+        $pdf->Cell(30, 6, substr($row['item_name'], 0, 12), 1, 0, 'L', $fill);
+        $pdf->Cell(15, 6, $row['quantity_requested'], 1, 0, 'C', $fill);
+        $pdf->Cell(15, 6, $row['quantity_approved'] ?? '0', 1, 0, 'C', $fill);
+        $pdf->Cell(20, 6, $row['category'], 1, 0, 'L', $fill);
+        $pdf->Cell(20, 6, ucfirst($row['urgency']), 1, 0, 'L', $fill);
+        $pdf->Cell(20, 6, ucfirst($row['status']), 1, 0, 'L', $fill);
+        $pdf->Cell(25, 6, substr($row['requested_by_name'], 0, 10), 1, 1, 'L', $fill);
         $fill = !$fill;
     }
     
@@ -501,13 +491,13 @@ function generateClearanceRequestsReport($pdf, $data) {
     $pdf->SetFont('Arial', 'B', 10);
     $pdf->SetFillColor(25, 25, 112);
     $pdf->SetTextColor(255, 255, 255);
-    $pdf->Cell(30, 8, 'Code', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Code', 1, 0, 'C', true);
     $pdf->Cell(35, 8, 'Student', 1, 0, 'C', true);
     $pdf->Cell(25, 8, 'Type', 1, 0, 'C', true);
     $pdf->Cell(25, 8, 'Req Date', 1, 0, 'C', true);
     $pdf->Cell(25, 8, 'Status', 1, 0, 'C', true);
-    $pdf->Cell(30, 8, 'Valid Until', 1, 0, 'C', true);
-    $pdf->Cell(30, 8, 'Purpose', 1, 1, 'C', true);
+    $pdf->Cell(25, 8, 'Valid Until', 1, 0, 'C', true);
+    $pdf->Cell(40, 8, 'Purpose', 1, 1, 'C', true);
     
     // Data
     $pdf->SetFont('Arial', '', 7);
@@ -516,13 +506,13 @@ function generateClearanceRequestsReport($pdf, $data) {
     $fill = false;
     
     foreach ($data as $row) {
-        $pdf->Cell(30, 6, $row['clearance_code'], 1, 0, 'C', $fill);
-        $pdf->Cell(35, 6, substr($row['student_name'], 0, 12), 1, 0, 'L', $fill);
-        $pdf->Cell(25, 6, substr($row['clearance_type'], 0, 10), 1, 0, 'L', $fill);
+        $pdf->Cell(25, 6, $row['clearance_code'], 1, 0, 'C', $fill);
+        $pdf->Cell(35, 6, substr($row['student_name'], 0, 15), 1, 0, 'L', $fill);
+        $pdf->Cell(25, 6, substr($row['clearance_type'], 0, 12), 1, 0, 'L', $fill);
         $pdf->Cell(25, 6, date('Y-m-d', strtotime($row['request_date'])), 1, 0, 'C', $fill);
         $pdf->Cell(25, 6, $row['status'], 1, 0, 'L', $fill);
-        $pdf->Cell(30, 6, $row['valid_until'] ?? 'N/A', 1, 0, 'C', $fill);
-        $pdf->Cell(30, 6, substr($row['purpose'], 0, 15), 1, 1, 'L', $fill);
+        $pdf->Cell(25, 6, $row['valid_until'] ?? 'N/A', 1, 0, 'C', $fill);
+        $pdf->Cell(40, 6, substr($row['purpose'], 0, 20), 1, 1, 'L', $fill);
         $fill = !$fill;
     }
     
@@ -540,13 +530,13 @@ function generateVisitHistoryReport($pdf, $data) {
     $pdf->SetFont('Arial', 'B', 10);
     $pdf->SetFillColor(25, 25, 112);
     $pdf->SetTextColor(255, 255, 255);
-    $pdf->Cell(30, 8, 'Student ID', 1, 0, 'C', true);
-    $pdf->Cell(30, 8, 'Date', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Student ID', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Date', 1, 0, 'C', true);
     $pdf->Cell(20, 8, 'Temp', 1, 0, 'C', true);
     $pdf->Cell(25, 8, 'BP', 1, 0, 'C', true);
-    $pdf->Cell(35, 8, 'Complaint', 1, 0, 'C', true);
+    $pdf->Cell(30, 8, 'Complaint', 1, 0, 'C', true);
     $pdf->Cell(35, 8, 'Treatment', 1, 0, 'C', true);
-    $pdf->Cell(25, 8, 'Disposition', 1, 1, 'C', true);
+    $pdf->Cell(30, 8, 'Disposition', 1, 1, 'C', true);
     
     // Data
     $pdf->SetFont('Arial', '', 7);
@@ -555,13 +545,13 @@ function generateVisitHistoryReport($pdf, $data) {
     $fill = false;
     
     foreach ($data as $row) {
-        $pdf->Cell(30, 6, $row['student_id'], 1, 0, 'C', $fill);
-        $pdf->Cell(30, 6, date('Y-m-d', strtotime($row['visit_date'])), 1, 0, 'C', $fill);
+        $pdf->Cell(25, 6, $row['student_id'], 1, 0, 'C', $fill);
+        $pdf->Cell(25, 6, date('Y-m-d', strtotime($row['visit_date'])), 1, 0, 'C', $fill);
         $pdf->Cell(20, 6, $row['temperature'] ?? 'N/A', 1, 0, 'C', $fill);
         $pdf->Cell(25, 6, $row['blood_pressure'] ?? 'N/A', 1, 0, 'C', $fill);
-        $pdf->Cell(35, 6, substr($row['complaint'], 0, 15), 1, 0, 'L', $fill);
+        $pdf->Cell(30, 6, substr($row['complaint'], 0, 15), 1, 0, 'L', $fill);
         $pdf->Cell(35, 6, substr($row['treatment_given'] ?? '', 0, 15), 1, 0, 'L', $fill);
-        $pdf->Cell(25, 6, $row['disposition'], 1, 1, 'L', $fill);
+        $pdf->Cell(30, 6, $row['disposition'], 1, 1, 'L', $fill);
         $fill = !$fill;
     }
     
@@ -579,14 +569,14 @@ function generateClinicStockReport($pdf, $data) {
     $pdf->SetFont('Arial', 'B', 10);
     $pdf->SetFillColor(25, 25, 112);
     $pdf->SetTextColor(255, 255, 255);
-    $pdf->Cell(30, 8, 'Item Code', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Item Code', 1, 0, 'C', true);
     $pdf->Cell(40, 8, 'Item Name', 1, 0, 'C', true);
     $pdf->Cell(20, 8, 'Category', 1, 0, 'C', true);
     $pdf->Cell(15, 8, 'Qty', 1, 0, 'C', true);
     $pdf->Cell(20, 8, 'Unit', 1, 0, 'C', true);
     $pdf->Cell(25, 8, 'Expiry', 1, 0, 'C', true);
     $pdf->Cell(20, 8, 'Min Stock', 1, 0, 'C', true);
-    $pdf->Cell(30, 8, 'Status', 1, 1, 'C', true);
+    $pdf->Cell(25, 8, 'Status', 1, 1, 'C', true);
     
     // Data
     $pdf->SetFont('Arial', '', 7);
@@ -600,7 +590,6 @@ function generateClinicStockReport($pdf, $data) {
     
     foreach ($data as $row) {
         $status = 'Normal';
-        $status_color = [0, 0, 0];
         
         if ($row['quantity'] <= $row['minimum_stock']) {
             $status = 'Low Stock';
@@ -612,14 +601,14 @@ function generateClinicStockReport($pdf, $data) {
             $expired_count++;
         }
         
-        $pdf->Cell(30, 6, $row['item_code'], 1, 0, 'C', $fill);
+        $pdf->Cell(25, 6, $row['item_code'], 1, 0, 'C', $fill);
         $pdf->Cell(40, 6, substr($row['item_name'], 0, 15), 1, 0, 'L', $fill);
         $pdf->Cell(20, 6, $row['category'], 1, 0, 'L', $fill);
         $pdf->Cell(15, 6, $row['quantity'], 1, 0, 'C', $fill);
         $pdf->Cell(20, 6, $row['unit'], 1, 0, 'C', $fill);
         $pdf->Cell(25, 6, $row['expiry_date'] ?? 'N/A', 1, 0, 'C', $fill);
         $pdf->Cell(20, 6, $row['minimum_stock'], 1, 0, 'C', $fill);
-        $pdf->Cell(30, 6, $status, 1, 1, 'L', $fill);
+        $pdf->Cell(25, 6, $status, 1, 1, 'L', $fill);
         $fill = !$fill;
     }
     
@@ -630,150 +619,291 @@ function generateClinicStockReport($pdf, $data) {
     $pdf->Cell(0, 6, 'Expired Items: ' . $expired_count, 0, 1);
 }
 
-function generateSummaryReport($pdf, $data, $db) {
+function generatePhysicalExamsReport($pdf, $data) {
+    $pdf->SetFont('Arial', 'B', 14);
+    $pdf->Cell(0, 10, 'Physical Exam Records Report', 0, 1, 'L');
+    $pdf->Ln(5);
+    
+    // Headers
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->SetFillColor(25, 25, 112);
+    $pdf->SetTextColor(255, 255, 255);
+    $pdf->Cell(25, 8, 'Student ID', 1, 0, 'C', true);
+    $pdf->Cell(35, 8, 'Student Name', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Exam Date', 1, 0, 'C', true);
+    $pdf->Cell(15, 8, 'Height', 1, 0, 'C', true);
+    $pdf->Cell(15, 8, 'Weight', 1, 0, 'C', true);
+    $pdf->Cell(15, 8, 'BMI', 1, 0, 'C', true);
+    $pdf->Cell(20, 8, 'Vision', 1, 0, 'C', true);
+    $pdf->Cell(30, 8, 'Fit Status', 1, 1, 'C', true);
+    
+    // Data
+    $pdf->SetFont('Arial', '', 7);
+    $pdf->SetTextColor(0, 0, 0);
+    $pdf->SetFillColor(245, 245, 245);
+    $fill = false;
+    
+    foreach ($data as $row) {
+        $pdf->Cell(25, 6, $row['student_id'], 1, 0, 'C', $fill);
+        $pdf->Cell(35, 6, substr($row['student_name'], 0, 15), 1, 0, 'L', $fill);
+        $pdf->Cell(25, 6, date('Y-m-d', strtotime($row['exam_date'])), 1, 0, 'C', $fill);
+        $pdf->Cell(15, 6, $row['height'] ?? 'N/A', 1, 0, 'C', $fill);
+        $pdf->Cell(15, 6, $row['weight'] ?? 'N/A', 1, 0, 'C', $fill);
+        $pdf->Cell(15, 6, $row['bmi'] ?? 'N/A', 1, 0, 'C', $fill);
+        $pdf->Cell(20, 6, ($row['vision_left'] ?? 'N/A') . '/' . ($row['vision_right'] ?? 'N/A'), 1, 0, 'C', $fill);
+        $pdf->Cell(30, 6, $row['fit_for_school'] ?? 'N/A', 1, 1, 'L', $fill);
+        $fill = !$fill;
+    }
+    
+    $pdf->Ln(10);
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->Cell(0, 6, 'Total Exams: ' . count($data), 0, 1);
+}
+
+function generateMedicalCertificatesReport($pdf, $data) {
+    $pdf->SetFont('Arial', 'B', 14);
+    $pdf->Cell(0, 10, 'Medical Certificates Report', 0, 1, 'L');
+    $pdf->Ln(5);
+    
+    // Headers
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->SetFillColor(25, 25, 112);
+    $pdf->SetTextColor(255, 255, 255);
+    $pdf->Cell(25, 8, 'Certificate', 1, 0, 'C', true);
+    $pdf->Cell(35, 8, 'Student', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Type', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Issued', 1, 0, 'C', true);
+    $pdf->Cell(25, 8, 'Valid Until', 1, 0, 'C', true);
+    $pdf->Cell(35, 8, 'Issued By', 1, 1, 'C', true);
+    
+    // Data
+    $pdf->SetFont('Arial', '', 7);
+    $pdf->SetTextColor(0, 0, 0);
+    $pdf->SetFillColor(245, 245, 245);
+    $fill = false;
+    
+    foreach ($data as $row) {
+        $pdf->Cell(25, 6, $row['certificate_code'], 1, 0, 'C', $fill);
+        $pdf->Cell(35, 6, substr($row['student_name'], 0, 15), 1, 0, 'L', $fill);
+        $pdf->Cell(25, 6, substr($row['certificate_type'], 0, 12), 1, 0, 'L', $fill);
+        $pdf->Cell(25, 6, date('Y-m-d', strtotime($row['issued_date'])), 1, 0, 'C', $fill);
+        $pdf->Cell(25, 6, $row['valid_until'] ?? 'N/A', 1, 0, 'C', $fill);
+        $pdf->Cell(35, 6, substr($row['issued_by'], 0, 15), 1, 1, 'L', $fill);
+        $fill = !$fill;
+    }
+    
+    $pdf->Ln(10);
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->Cell(0, 6, 'Total Certificates: ' . count($data), 0, 1);
+}
+
+function generateEmergencyCasesReport($pdf, $data) {
+    $pdf->SetFont('Arial', 'B', 14);
+    $pdf->Cell(0, 10, 'Emergency Cases Report', 0, 1, 'L');
+    $pdf->Ln(5);
+    
+    // Headers
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->SetFillColor(25, 25, 112);
+    $pdf->SetTextColor(255, 255, 255);
+    $pdf->Cell(25, 8, 'Incident ID', 1, 0, 'C', true);
+    $pdf->Cell(30, 8, 'Student ID', 1, 0, 'C', true);
+    $pdf->Cell(30, 8, 'Response Time', 1, 0, 'C', true);
+    $pdf->Cell(20, 8, 'Ambulance', 1, 0, 'C', true);
+    $pdf->Cell(35, 8, 'Hospital', 1, 0, 'C', true);
+    $pdf->Cell(40, 8, 'Outcome', 1, 1, 'C', true);
+    
+    // Data
+    $pdf->SetFont('Arial', '', 7);
+    $pdf->SetTextColor(0, 0, 0);
+    $pdf->SetFillColor(245, 245, 245);
+    $fill = false;
+    
+    foreach ($data as $row) {
+        $pdf->Cell(25, 6, $row['incident_id'], 1, 0, 'C', $fill);
+        $pdf->Cell(30, 6, $row['student_id'], 1, 0, 'C', $fill);
+        $pdf->Cell(30, 6, $row['response_time'], 1, 0, 'C', $fill);
+        $pdf->Cell(20, 6, $row['ambulance_called'], 1, 0, 'C', $fill);
+        $pdf->Cell(35, 6, substr($row['hospital_referred'] ?? 'N/A', 0, 15), 1, 0, 'L', $fill);
+        $pdf->Cell(40, 6, substr($row['outcome'] ?? 'N/A', 0, 20), 1, 1, 'L', $fill);
+        $fill = !$fill;
+    }
+    
+    $pdf->Ln(10);
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->Cell(0, 6, 'Total Emergency Cases: ' . count($data), 0, 1);
+}
+
+function generateSummaryReport($pdf, $data, $db, $date_from, $date_to) {
     $pdf->SetFont('Arial', 'B', 14);
     $pdf->Cell(0, 10, 'System Summary Report', 0, 1, 'L');
     $pdf->Ln(10);
     
-    // Get counts
-    $counts = [];
+    // Get counts for all tables
     $tables = [
         'users' => 'users',
         'patients' => 'patients',
-        'appointments' => 'appointments',
         'incidents' => 'incidents',
         'medicine_requests' => 'medicine_requests',
         'clearance_requests' => 'clearance_requests',
         'clinic_stock' => 'clinic_stock',
-        'visit_history' => 'visit_history'
+        'visit_history' => 'visit_history',
+        'physical_exam_records' => 'physical_exam_records',
+        'medical_certificates' => 'medical_certificates',
+        'emergency_cases' => 'emergency_cases',
+        'dispensing_log' => 'dispensing_log'
     ];
     
+    $counts = [];
     foreach ($tables as $key => $table) {
         $stmt = $db->query("SELECT COUNT(*) as total FROM $table");
         $counts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
     }
     
+    // Get date range counts
+    $date_counts = [];
+    $date_queries = [
+        'incidents' => "SELECT COUNT(*) as total FROM incidents WHERE DATE(incident_date) BETWEEN '$date_from' AND '$date_to'",
+        'medicine_requests' => "SELECT COUNT(*) as total FROM medicine_requests WHERE DATE(requested_date) BETWEEN '$date_from' AND '$date_to'",
+        'clearance_requests' => "SELECT COUNT(*) as total FROM clearance_requests WHERE DATE(request_date) BETWEEN '$date_from' AND '$date_to'",
+        'visit_history' => "SELECT COUNT(*) as total FROM visit_history WHERE DATE(visit_date) BETWEEN '$date_from' AND '$date_to'",
+        'dispensing_log' => "SELECT COUNT(*) as total FROM dispensing_log WHERE DATE(dispensed_date) BETWEEN '$date_from' AND '$date_to'"
+    ];
+    
+    foreach ($date_queries as $key => $query) {
+        $stmt = $db->query($query);
+        $date_counts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+    }
+    
     // Display summary
     $pdf->SetFont('Arial', 'B', 12);
-    $pdf->Cell(0, 10, 'System Statistics', 0, 1, 'L');
+    $pdf->Cell(0, 10, 'Overall System Statistics', 0, 1, 'L');
     $pdf->Ln(5);
     
     $pdf->SetFont('Arial', '', 11);
-    $pdf->Cell(60, 8, 'Total Users:', 0, 0);
+    $pdf->Cell(70, 8, 'Total Users:', 0, 0);
     $pdf->Cell(30, 8, $counts['users'], 0, 1);
     
-    $pdf->Cell(60, 8, 'Total Patients:', 0, 0);
+    $pdf->Cell(70, 8, 'Total Patients:', 0, 0);
     $pdf->Cell(30, 8, $counts['patients'], 0, 1);
     
-    $pdf->Cell(60, 8, 'Total Appointments:', 0, 0);
-    $pdf->Cell(30, 8, $counts['appointments'], 0, 1);
-    
-    $pdf->Cell(60, 8, 'Total Incidents:', 0, 0);
+    $pdf->Cell(70, 8, 'Total Incidents:', 0, 0);
     $pdf->Cell(30, 8, $counts['incidents'], 0, 1);
     
-    $pdf->Cell(60, 8, 'Medicine Requests:', 0, 0);
+    $pdf->Cell(70, 8, 'Medicine Requests:', 0, 0);
     $pdf->Cell(30, 8, $counts['medicine_requests'], 0, 1);
     
-    $pdf->Cell(60, 8, 'Clearance Requests:', 0, 0);
+    $pdf->Cell(70, 8, 'Clearance Requests:', 0, 0);
     $pdf->Cell(30, 8, $counts['clearance_requests'], 0, 1);
     
-    $pdf->Cell(60, 8, 'Clinic Stock Items:', 0, 0);
+    $pdf->Cell(70, 8, 'Clinic Stock Items:', 0, 0);
     $pdf->Cell(30, 8, $counts['clinic_stock'], 0, 1);
     
-    $pdf->Cell(60, 8, 'Visit History:', 0, 0);
+    $pdf->Cell(70, 8, 'Visit History:', 0, 0);
     $pdf->Cell(30, 8, $counts['visit_history'], 0, 1);
+    
+    $pdf->Cell(70, 8, 'Physical Exams:', 0, 0);
+    $pdf->Cell(30, 8, $counts['physical_exam_records'], 0, 1);
+    
+    $pdf->Cell(70, 8, 'Medical Certificates:', 0, 0);
+    $pdf->Cell(30, 8, $counts['medical_certificates'], 0, 1);
+    
+    $pdf->Cell(70, 8, 'Emergency Cases:', 0, 0);
+    $pdf->Cell(30, 8, $counts['emergency_cases'], 0, 1);
+    
+    $pdf->Cell(70, 8, 'Medicine Dispensed:', 0, 0);
+    $pdf->Cell(30, 8, $counts['dispensing_log'], 0, 1);
     
     // Date range summary
     $pdf->Ln(10);
     $pdf->SetFont('Arial', 'B', 12);
-    $pdf->Cell(0, 10, 'Date Range Summary', 0, 1, 'L');
+    $pdf->Cell(0, 10, 'Selected Period Statistics', 0, 1, 'L');
     $pdf->Ln(5);
     
     $pdf->SetFont('Arial', '', 11);
     $pdf->Cell(0, 8, 'Report Period: ' . date('M d, Y', strtotime($date_from)) . ' - ' . date('M d, Y', strtotime($date_to)), 0, 1);
+    $pdf->Ln(5);
+    
+    $pdf->Cell(70, 8, 'Incidents:', 0, 0);
+    $pdf->Cell(30, 8, $date_counts['incidents'], 0, 1);
+    
+    $pdf->Cell(70, 8, 'Medicine Requests:', 0, 0);
+    $pdf->Cell(30, 8, $date_counts['medicine_requests'], 0, 1);
+    
+    $pdf->Cell(70, 8, 'Clearance Requests:', 0, 0);
+    $pdf->Cell(30, 8, $date_counts['clearance_requests'], 0, 1);
+    
+    $pdf->Cell(70, 8, 'Visit History:', 0, 0);
+    $pdf->Cell(30, 8, $date_counts['visit_history'], 0, 1);
+    
+    $pdf->Cell(70, 8, 'Medicine Dispensed:', 0, 0);
+    $pdf->Cell(30, 8, $date_counts['dispensing_log'], 0, 1);
 }
 
-// Get summary statistics for dashboard
-$summary_stats = [];
+// Get chart data
+$chart_data = [];
 
-// User counts by role
-$query = "SELECT role, COUNT(*) as count FROM users GROUP BY role";
-$stmt = $db->query($query);
-$role_counts = [];
-while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    $role_counts[$row['role']] = $row['count'];
-}
-$summary_stats['users_by_role'] = $role_counts;
-
-// Appointment counts by status
-$query = "SELECT status, COUNT(*) as count FROM appointments WHERE appointment_date BETWEEN :date_from AND :date_to GROUP BY status";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':date_from', $date_from);
-$stmt->bindParam(':date_to', $date_to);
-$stmt->execute();
-$appointment_counts = [];
-while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    $appointment_counts[$row['status']] = $row['count'];
-}
-$summary_stats['appointments_by_status'] = $appointment_counts;
-
-// Incident counts by type
+// Incident types chart
 $query = "SELECT incident_type, COUNT(*) as count FROM incidents WHERE incident_date BETWEEN :date_from AND :date_to GROUP BY incident_type";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':date_from', $date_from);
 $stmt->bindParam(':date_to', $date_to);
 $stmt->execute();
-$incident_counts = [];
-while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    $incident_counts[$row['incident_type']] = $row['count'];
-}
-$summary_stats['incidents_by_type'] = $incident_counts;
+$incident_chart = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['incident_types'] = $incident_chart;
 
-// Medicine request counts by status
-$query = "SELECT status, COUNT(*) as count FROM medicine_requests WHERE DATE(requested_date) BETWEEN :date_from AND :date_to GROUP BY status";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':date_from', $date_from);
-$stmt->bindParam(':date_to', $date_to);
-$stmt->execute();
-$request_counts = [];
-while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    $request_counts[$row['status']] = $row['count'];
-}
-$summary_stats['requests_by_status'] = $request_counts;
-
-// Total medicine dispensed
-$query = "SELECT COUNT(*) as total, SUM(quantity) as total_quantity FROM dispensing_log WHERE DATE(dispensed_date) BETWEEN :date_from AND :date_to";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':date_from', $date_from);
-$stmt->bindParam(':date_to', $date_to);
-$stmt->execute();
-$dispensed_stats = $stmt->fetch(PDO::FETCH_ASSOC);
-$summary_stats['dispensed'] = $dispensed_stats;
-
-// Clearance counts by status
+// Clearance status chart
 $query = "SELECT status, COUNT(*) as count FROM clearance_requests WHERE request_date BETWEEN :date_from AND :date_to GROUP BY status";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':date_from', $date_from);
 $stmt->bindParam(':date_to', $date_to);
 $stmt->execute();
-$clearance_counts = [];
-while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    $clearance_counts[$row['status']] = $row['count'];
-}
-$summary_stats['clearance_by_status'] = $clearance_counts;
+$clearance_chart = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['clearance_status'] = $clearance_chart;
 
-// Low stock items
-$query = "SELECT COUNT(*) as count FROM clinic_stock WHERE quantity <= minimum_stock";
-$stmt = $db->query($query);
-$summary_stats['low_stock'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
-
-// Expiring soon (within 30 days)
-$thirty_days = date('Y-m-d', strtotime('+30 days'));
-$query = "SELECT COUNT(*) as count FROM clinic_stock WHERE expiry_date IS NOT NULL AND expiry_date <= :thirty_days AND expiry_date >= CURDATE()";
+// Medicine request status chart
+$query = "SELECT status, COUNT(*) as count FROM medicine_requests WHERE DATE(requested_date) BETWEEN :date_from AND :date_to GROUP BY status";
 $stmt = $db->prepare($query);
-$stmt->bindParam(':thirty_days', $thirty_days);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
 $stmt->execute();
-$summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+$request_chart = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['request_status'] = $request_chart;
+
+// Daily activity for last 7 days
+$last_7_days = date('Y-m-d', strtotime('-7 days', strtotime($date_to)));
+$query = "SELECT 
+            DATE(visit_date) as date,
+            COUNT(*) as count 
+          FROM visit_history 
+          WHERE visit_date BETWEEN :last_7_days AND :date_to 
+          GROUP BY DATE(visit_date) 
+          ORDER BY date ASC";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':last_7_days', $last_7_days);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$daily_visits = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['daily_visits'] = $daily_visits;
+
+// Stock status
+$query = "SELECT 
+            CASE 
+                WHEN quantity <= minimum_stock THEN 'Low Stock'
+                WHEN expiry_date < CURDATE() THEN 'Expired'
+                ELSE 'Normal'
+            END as status,
+            COUNT(*) as count 
+          FROM clinic_stock 
+          GROUP BY status";
+$stmt = $db->query($query);
+$stock_chart = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['stock_status'] = $stock_chart;
+
+// Get preview data
+$preview_data = getReportData($report_type, $date_from, $date_to, 'full', $search, $db);
+$preview_count = count($preview_data);
+$preview_data = array_slice($preview_data, 0, 10);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -784,6 +914,7 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
     * {
         margin: 0;
@@ -886,17 +1017,6 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
         box-shadow: 0 8px 16px rgba(46, 125, 50, 0.2);
     }
 
-    .btn-warning {
-        background: #ff9800;
-        color: white;
-    }
-
-    .btn-warning:hover {
-        background: #ffa726;
-        transform: translateY(-2px);
-        box-shadow: 0 8px 16px rgba(255, 152, 0, 0.2);
-    }
-
     .btn-secondary {
         background: #eceff1;
         color: #191970;
@@ -962,20 +1082,13 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
         box-shadow: 0 4px 12px rgba(25, 25, 112, 0.1);
     }
 
-    .filter-actions {
-        display: flex;
-        gap: 12px;
-        justify-content: flex-end;
-        margin-top: 20px;
-    }
-
-    /* Export Options */
     .export-options {
         display: flex;
-        gap: 12px;
-        margin-top: 20px;
-        padding-top: 20px;
-        border-top: 1px solid #cfd8dc;
+        gap: 24px;
+        margin: 20px 0;
+        padding: 16px;
+        background: #f8fafc;
+        border-radius: 12px;
     }
 
     .export-option {
@@ -990,9 +1103,39 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
         height: 16px;
     }
 
-    .export-option label {
-        font-size: 0.9rem;
-        color: #1e293b;
+    .filter-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+    }
+
+    /* Charts Grid */
+    .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 24px;
+        margin-bottom: 30px;
+        animation: fadeInUp 0.7s ease;
+    }
+
+    .chart-card {
+        background: white;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 1px solid #cfd8dc;
+    }
+
+    .chart-card h3 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #191970;
+        margin-bottom: 20px;
+    }
+
+    .chart-container {
+        height: 250px;
+        position: relative;
     }
 
     /* Stats Grid */
@@ -1001,7 +1144,7 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
         grid-template-columns: repeat(4, 1fr);
         gap: 24px;
         margin-bottom: 30px;
-        animation: fadeInUp 0.7s ease;
+        animation: fadeInUp 0.8s ease;
     }
 
     .stat-card {
@@ -1053,93 +1196,6 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
         letter-spacing: 0.5px;
     }
 
-    .stat-badge {
-        display: inline-block;
-        padding: 4px 8px;
-        border-radius: 20px;
-        font-size: 0.65rem;
-        font-weight: 600;
-        margin-top: 8px;
-    }
-
-    .badge-warning {
-        background: #fff3cd;
-        color: #ff9800;
-    }
-
-    .badge-danger {
-        background: #ffebee;
-        color: #c62828;
-    }
-
-    /* Summary Cards */
-    .summary-section {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 24px;
-        margin-bottom: 30px;
-        animation: fadeInUp 0.8s ease;
-    }
-
-    .summary-card {
-        background: white;
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        border: 1px solid #cfd8dc;
-    }
-
-    .summary-card h2 {
-        font-size: 1.2rem;
-        font-weight: 600;
-        color: #191970;
-        margin-bottom: 20px;
-    }
-
-    .summary-list {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-    }
-
-    .summary-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 0;
-        border-bottom: 1px solid #eceff1;
-    }
-
-    .summary-item:last-child {
-        border-bottom: none;
-    }
-
-    .summary-label {
-        font-size: 0.95rem;
-        color: #546e7a;
-    }
-
-    .summary-value {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: #191970;
-    }
-
-    .progress-bar {
-        width: 100%;
-        height: 8px;
-        background: #eceff1;
-        border-radius: 4px;
-        margin-top: 8px;
-    }
-
-    .progress-fill {
-        height: 100%;
-        background: #191970;
-        border-radius: 4px;
-        transition: width 0.3s ease;
-    }
-
     /* Preview Table */
     .preview-section {
         background: white;
@@ -1164,22 +1220,13 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
         color: #191970;
     }
 
-    .view-all {
-        color: #191970;
-        text-decoration: none;
-        font-size: 0.9rem;
-        font-weight: 500;
+    .record-count {
         padding: 6px 14px;
         background: #eceff1;
         border-radius: 20px;
-        border: 1px solid #cfd8dc;
-        transition: all 0.3s ease;
-    }
-
-    .view-all:hover {
-        background: #191970;
-        color: white;
-        border-color: #191970;
+        font-size: 0.9rem;
+        color: #191970;
+        font-weight: 500;
     }
 
     .table-wrapper {
@@ -1211,55 +1258,11 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
         border-bottom: 1px solid #cfd8dc;
     }
 
-    .badge {
-        padding: 4px 10px;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        display: inline-block;
-    }
-
-    .badge-success {
-        background: #e8f5e9;
-        color: #2e7d32;
-    }
-
-    .badge-warning {
-        background: #fff3cd;
-        color: #ff9800;
-    }
-
-    .badge-danger {
-        background: #ffebee;
-        color: #c62828;
-    }
-
-    .badge-info {
-        background: #e0f2fe;
-        color: #0284c7;
-    }
-
-    .badge-primary {
-        background: #e8eaf6;
-        color: #191970;
-    }
-
-    .action-btn-small {
-        padding: 8px 14px;
-        background: #eceff1;
-        border: 1px solid #cfd8dc;
-        border-radius: 6px;
-        font-size: 0.8rem;
-        font-weight: 500;
-        color: #191970;
-        cursor: pointer;
-        transition: all 0.3s ease;
-    }
-
-    .action-btn-small:hover {
-        background: #191970;
-        color: white;
-        border-color: #191970;
+    .no-data {
+        text-align: center;
+        padding: 40px;
+        color: #546e7a;
+        font-style: italic;
     }
 
     @keyframes fadeInUp {
@@ -1274,12 +1277,12 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
     }
 
     @media (max-width: 1280px) {
-        .stats-grid {
-            grid-template-columns: repeat(2, 1fr);
+        .charts-grid {
+            grid-template-columns: 1fr;
         }
         
-        .summary-section {
-            grid-template-columns: 1fr;
+        .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
         }
     }
 
@@ -1299,6 +1302,7 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
         
         .export-options {
             flex-direction: column;
+            gap: 12px;
         }
     }
     </style>
@@ -1333,17 +1337,19 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
                         <div class="filter-grid">
                             <div class="filter-group">
                                 <label for="report_type">Report Type</label>
-                                <select name="report_type" id="report_type" onchange="this.form.submit()">
+                                <select name="report_type" id="report_type">
                                     <option value="summary" <?php echo $report_type == 'summary' ? 'selected' : ''; ?>>System Summary</option>
                                     <option value="users" <?php echo $report_type == 'users' ? 'selected' : ''; ?>>Users Report</option>
                                     <option value="patients" <?php echo $report_type == 'patients' ? 'selected' : ''; ?>>Patients Report</option>
-                                
                                     <option value="incidents" <?php echo $report_type == 'incidents' ? 'selected' : ''; ?>>Incidents Report</option>
                                     <option value="medicine_dispensed" <?php echo $report_type == 'medicine_dispensed' ? 'selected' : ''; ?>>Medicine Dispensed</option>
                                     <option value="medicine_requests" <?php echo $report_type == 'medicine_requests' ? 'selected' : ''; ?>>Medicine Requests</option>
                                     <option value="clearance_requests" <?php echo $report_type == 'clearance_requests' ? 'selected' : ''; ?>>Health Clearance</option>
                                     <option value="visit_history" <?php echo $report_type == 'visit_history' ? 'selected' : ''; ?>>Visit History</option>
                                     <option value="clinic_stock" <?php echo $report_type == 'clinic_stock' ? 'selected' : ''; ?>>Clinic Stock</option>
+                                    <option value="physical_exams" <?php echo $report_type == 'physical_exams' ? 'selected' : ''; ?>>Physical Exams</option>
+                                    <option value="medical_certificates" <?php echo $report_type == 'medical_certificates' ? 'selected' : ''; ?>>Medical Certificates</option>
+                                    <option value="emergency_cases" <?php echo $report_type == 'emergency_cases' ? 'selected' : ''; ?>>Emergency Cases</option>
                                 </select>
                             </div>
                             <div class="filter-group">
@@ -1364,23 +1370,23 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
                             <span style="font-weight: 600; color: #191970;">Export Options:</span>
                             <div class="export-option">
                                 <input type="radio" name="export_type" id="full" value="full" <?php echo $export_type == 'full' ? 'checked' : ''; ?>>
-                                <label for="full">Full Report (All records)</label>
+                                <label for="full">Full Report (All records in date range)</label>
                             </div>
                             <div class="export-option">
                                 <input type="radio" name="export_type" id="partial" value="partial" <?php echo $export_type == 'partial' ? 'checked' : ''; ?>>
-                                <label for="partial">Partial Report (Filtered results)</label>
+                                <label for="partial">Partial Report (Filtered by search)</label>
                             </div>
                         </div>
 
                         <div class="filter-actions">
-                            <button type="submit" class="btn btn-primary">
+                            <button type="submit" name="apply" value="1" class="btn btn-primary">
                                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                                     <circle cx="11" cy="11" r="8"/>
                                     <path d="M21 21L16.5 16.5"/>
                                 </svg>
                                 Apply Filters
                             </button>
-                            <button type="submit" name="export" value="pdf" class="btn btn-success" onclick="this.form.target='_blank'">
+                            <button type="submit" name="export" value="pdf" class="btn btn-success">
                                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15"/>
                                     <path d="M7 10L12 15L17 10"/>
@@ -1392,19 +1398,69 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
                     </form>
                 </div>
 
-                <!-- Quick Stats -->
+                <!-- Charts Section -->
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <h3>Incidents by Type</h3>
+                        <div class="chart-container">
+                            <canvas id="incidentChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Clearance Request Status</h3>
+                        <div class="chart-container">
+                            <canvas id="clearanceChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Medicine Request Status</h3>
+                        <div class="chart-container">
+                            <canvas id="requestChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Daily Visits (Last 7 Days)</h3>
+                        <div class="chart-container">
+                            <canvas id="visitsChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stats Grid -->
                 <div class="stats-grid">
+                    <?php
+                    // Get totals for stats
+                    $total_incidents = 0;
+                    foreach ($incident_chart as $item) {
+                        $total_incidents += $item['count'];
+                    }
+                    
+                    $total_clearance = 0;
+                    foreach ($clearance_chart as $item) {
+                        $total_clearance += $item['count'];
+                    }
+                    
+                    $total_requests = 0;
+                    foreach ($request_chart as $item) {
+                        $total_requests += $item['count'];
+                    }
+                    
+                    $total_visits = 0;
+                    foreach ($daily_visits as $item) {
+                        $total_visits += $item['count'];
+                    }
+                    ?>
                     <div class="stat-card">
                         <div class="stat-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                <circle cx="12" cy="8" r="4"/>
-                                <path d="M5.5 20V19C5.5 17.1435 6.2375 15.363 7.55025 14.0503C8.86301 12.7375 10.6435 12 12.5 12C14.3565 12 16.137 12.7375 17.4497 14.0503C18.7625 15.363 19.5 17.1435 19.5 19V20"/>
+                                <path d="M12 2L2 7L12 12L22 7L12 2Z"/>
+                                <path d="M2 17L12 22L22 17"/>
+                                <path d="M2 12L12 17L22 12"/>
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3><?php echo $summary_stats['dispensed']['total'] ?? 0; ?></h3>
-                            <p>Items Dispensed</p>
-                            <span class="stat-badge badge-info">Qty: <?php echo $summary_stats['dispensed']['total_quantity'] ?? 0; ?></span>
+                            <h3><?php echo $total_incidents; ?></h3>
+                            <p>Total Incidents</p>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -1415,132 +1471,34 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3><?php echo $summary_stats['low_stock']; ?></h3>
-                            <p>Low Stock Items</p>
-                            <?php if ($summary_stats['low_stock'] > 0): ?>
-                            <span class="stat-badge badge-warning">Needs Restock</span>
-                            <?php endif; ?>
+                            <h3><?php echo $total_clearance; ?></h3>
+                            <p>Clearance Requests</p>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                <path d="M12 2L2 7L12 12L22 7L12 2Z"/>
-                                <path d="M2 17L12 22L22 17"/>
-                                <path d="M2 12L12 17L22 12"/>
+                                <path d="M10.5 4.5L19.5 9.5L12 14L3 9.5L10.5 4.5Z"/>
+                                <path d="M3 14.5L10.5 19L19.5 14.5"/>
+                                <path d="M3 9.5V19.5"/>
+                                <path d="M19.5 9.5V19.5"/>
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3><?php echo $summary_stats['expiring_soon']; ?></h3>
-                            <p>Expiring Soon</p>
-                            <?php if ($summary_stats['expiring_soon'] > 0): ?>
-                            <span class="stat-badge badge-danger">Within 30 days</span>
-                            <?php endif; ?>
+                            <h3><?php echo $total_requests; ?></h3>
+                            <p>Medicine Requests</p>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                <path d="M3 3V21H21"/>
-                                <path d="M7 15L10 11L13 14L20 7"/>
+                                <circle cx="12" cy="8" r="4"/>
+                                <path d="M5.5 20V19C5.5 17.1435 6.2375 15.363 7.55025 14.0503C8.86301 12.7375 10.6435 12 12.5 12C14.3565 12 16.137 12.7375 17.4497 14.0503C18.7625 15.363 19.5 17.1435 19.5 19V20"/>
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3><?php echo count($summary_stats['users_by_role'] ?? []); ?></h3>
-                            <p>User Roles</p>
-                            <span class="stat-badge badge-primary">Active</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Summary Cards -->
-                <div class="summary-section">
-                    <div class="summary-card">
-                        <h2>Records by Status</h2>
-                        <div class="summary-list">
-                            <div class="summary-item">
-                                <span class="summary-label">Appointments (Scheduled)</span>
-                                <span class="summary-value"><?php echo $summary_stats['appointments_by_status']['scheduled'] ?? 0; ?></span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-label">Appointments (Completed)</span>
-                                <span class="summary-value"><?php echo $summary_stats['appointments_by_status']['completed'] ?? 0; ?></span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-label">Medicine Requests (Pending)</span>
-                                <span class="summary-value"><?php echo $summary_stats['requests_by_status']['pending'] ?? 0; ?></span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-label">Medicine Requests (Approved)</span>
-                                <span class="summary-value"><?php echo $summary_stats['requests_by_status']['approved'] ?? 0; ?></span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-label">Clearances (Pending)</span>
-                                <span class="summary-value"><?php echo $summary_stats['clearance_by_status']['Pending'] ?? 0; ?></span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-label">Clearances (Approved)</span>
-                                <span class="summary-value"><?php echo $summary_stats['clearance_by_status']['Approved'] ?? 0; ?></span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="summary-card">
-                        <h2>Incident Distribution</h2>
-                        <div class="summary-list">
-                            <div class="summary-item">
-                                <span class="summary-label">Incidents</span>
-                                <span class="summary-value"><?php echo $summary_stats['incidents_by_type']['Incident'] ?? 0; ?></span>
-                            </div>
-                            <div class="progress-bar">
-                                <?php 
-                                $total_incidents = array_sum($summary_stats['incidents_by_type'] ?? [0]);
-                                $incident_percent = $total_incidents > 0 ? (($summary_stats['incidents_by_type']['Incident'] ?? 0) / $total_incidents) * 100 : 0;
-                                ?>
-                                <div class="progress-fill" style="width: <?php echo $incident_percent; ?>%"></div>
-                            </div>
-                            
-                            <div class="summary-item">
-                                <span class="summary-label">Minor Injuries</span>
-                                <span class="summary-value"><?php echo $summary_stats['incidents_by_type']['Minor Injury'] ?? 0; ?></span>
-                            </div>
-                            <div class="progress-bar">
-                                <?php 
-                                $minor_percent = $total_incidents > 0 ? (($summary_stats['incidents_by_type']['Minor Injury'] ?? 0) / $total_incidents) * 100 : 0;
-                                ?>
-                                <div class="progress-fill" style="width: <?php echo $minor_percent; ?>%"></div>
-                            </div>
-                            
-                            <div class="summary-item">
-                                <span class="summary-label">Emergencies</span>
-                                <span class="summary-value"><?php echo $summary_stats['incidents_by_type']['Emergency'] ?? 0; ?></span>
-                            </div>
-                            <div class="progress-bar">
-                                <?php 
-                                $emergency_percent = $total_incidents > 0 ? (($summary_stats['incidents_by_type']['Emergency'] ?? 0) / $total_incidents) * 100 : 0;
-                                ?>
-                                <div class="progress-fill" style="width: <?php echo $emergency_percent; ?>%"></div>
-                            </div>
-                        </div>
-                        
-                        <h2 style="margin-top: 24px;">User Distribution</h2>
-                        <div class="summary-list">
-                            <div class="summary-item">
-                                <span class="summary-label">Super Admins</span>
-                                <span class="summary-value"><?php echo $summary_stats['users_by_role']['superadmin'] ?? 0; ?></span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-label">Admins</span>
-                                <span class="summary-value"><?php echo $summary_stats['users_by_role']['admin'] ?? 0; ?></span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-label">Staff</span>
-                                <span class="summary-value"><?php echo $summary_stats['users_by_role']['staff'] ?? 0; ?></span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-label">Doctors</span>
-                                <span class="summary-value"><?php echo $summary_stats['users_by_role']['doctor'] ?? 0; ?></span>
-                            </div>
+                            <h3><?php echo $total_visits; ?></h3>
+                            <p>Clinic Visits</p>
                         </div>
                     </div>
                 </div>
@@ -1549,26 +1507,28 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
                 <div class="preview-section">
                     <div class="section-header">
                         <h2>Data Preview - <?php echo ucwords(str_replace('_', ' ', $report_type)); ?></h2>
-                        <span class="view-all">Showing filtered results</span>
+                        <span class="record-count"><?php echo $preview_count; ?> records found</span>
                     </div>
                     <div class="table-wrapper">
-                        <?php
-                        // Get preview data based on report type
-                        $preview_data = getReportData($report_type, $date_from, $date_to, 'full', $search, $db);
-                        $preview_data = array_slice($preview_data, 0, 10); // Show only first 10
-                        
-                        if (empty($preview_data)): ?>
-                            <p style="text-align: center; padding: 40px; color: #546e7a;">No data available for the selected filters.</p>
+                        <?php if (empty($preview_data)): ?>
+                            <div class="no-data">
+                                <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#546e7a" stroke-width="1.5">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <path d="M12 8V12L12 16"/>
+                                </svg>
+                                <p style="margin-top: 16px;">No data available for the selected filters.</p>
+                            </div>
                         <?php else: ?>
                         <table class="data-table">
                             <thead>
                                 <tr>
                                     <?php
-                                    // Dynamic headers based on first row
                                     if (!empty($preview_data)) {
                                         $first_row = $preview_data[0];
                                         foreach (array_keys($first_row) as $key) {
-                                            echo '<th>' . ucwords(str_replace('_', ' ', $key)) . '</th>';
+                                            if (!in_array($key, ['id', 'password', 'token'])) { // Skip sensitive fields
+                                                echo '<th>' . ucwords(str_replace('_', ' ', $key)) . '</th>';
+                                            }
                                         }
                                     }
                                     ?>
@@ -1577,19 +1537,26 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
                             <tbody>
                                 <?php foreach ($preview_data as $row): ?>
                                 <tr>
-                                    <?php foreach ($row as $value): ?>
-                                    <td>
-                                        <?php 
-                                        if (is_numeric($value) && strlen($value) > 10 && strpos($value, '-') !== false) {
-                                            // Likely a date
-                                            echo date('Y-m-d', strtotime($value));
-                                        } elseif (strlen($value) > 30) {
-                                            echo substr(htmlspecialchars($value), 0, 30) . '...';
-                                        } else {
-                                            echo htmlspecialchars($value ?? 'N/A');
-                                        }
-                                        ?>
-                                    </td>
+                                    <?php foreach ($row as $key => $value): ?>
+                                        <?php if (!in_array($key, ['id', 'password', 'token'])): ?>
+                                        <td>
+                                            <?php 
+                                            if (is_null($value) || $value === '') {
+                                                echo 'N/A';
+                                            } elseif (strpos($key, 'date') !== false || strpos($key, 'Date') !== false) {
+                                                if (strtotime($value)) {
+                                                    echo date('Y-m-d', strtotime($value));
+                                                } else {
+                                                    echo htmlspecialchars($value);
+                                                }
+                                            } elseif (strlen($value) > 30) {
+                                                echo htmlspecialchars(substr($value, 0, 30)) . '...';
+                                            } else {
+                                                echo htmlspecialchars($value);
+                                            }
+                                            ?>
+                                        </td>
+                                        <?php endif; ?>
                                     <?php endforeach; ?>
                                 </tr>
                                 <?php endforeach; ?>
@@ -1603,7 +1570,7 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
     </div>
 
     <script>
-        // Sidebar toggle sync
+        // Sidebar toggle
         const sidebar = document.querySelector('.sidebar');
         const mainContent = document.getElementById('mainContent');
         const collapseBtn = document.getElementById('collapseSidebar');
@@ -1615,7 +1582,7 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
             });
         }
 
-        // Reset filters function
+        // Reset filters
         function resetFilters() {
             document.getElementById('report_type').value = 'summary';
             document.getElementById('date_from').value = '<?php echo date('Y-m-d', strtotime('-30 days')); ?>';
@@ -1625,35 +1592,155 @@ $summary_stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
             document.getElementById('reportForm').submit();
         }
 
+        // Initialize charts
+        document.addEventListener('DOMContentLoaded', function() {
+            // Incident Chart
+            const incidentCtx = document.getElementById('incidentChart').getContext('2d');
+            new Chart(incidentCtx, {
+                type: 'pie',
+                data: {
+                    labels: <?php echo json_encode(array_column($incident_chart, 'incident_type')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($incident_chart, 'count')); ?>,
+                        backgroundColor: ['#191970', '#ff9800', '#f44336'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // Clearance Chart
+            const clearanceCtx = document.getElementById('clearanceChart').getContext('2d');
+            new Chart(clearanceCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: <?php echo json_encode(array_column($clearance_chart, 'status')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($clearance_chart, 'count')); ?>,
+                        backgroundColor: ['#4caf50', '#ff9800', '#f44336', '#9e9e9e'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // Request Chart
+            const requestCtx = document.getElementById('requestChart').getContext('2d');
+            new Chart(requestCtx, {
+                type: 'bar',
+                data: {
+                    labels: <?php echo json_encode(array_column($request_chart, 'status')); ?>,
+                    datasets: [{
+                        label: 'Number of Requests',
+                        data: <?php echo json_encode(array_column($request_chart, 'count')); ?>,
+                        backgroundColor: '#191970',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                display: false
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+
+            // Visits Chart
+            const visitsCtx = document.getElementById('visitsChart').getContext('2d');
+            const visitDates = <?php echo json_encode(array_column($daily_visits, 'date')); ?>;
+            const visitCounts = <?php echo json_encode(array_column($daily_visits, 'count')); ?>;
+            
+            new Chart(visitsCtx, {
+                type: 'line',
+                data: {
+                    labels: visitDates.map(date => {
+                        const d = new Date(date);
+                        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    }),
+                    datasets: [{
+                        label: 'Visits',
+                        data: visitCounts,
+                        borderColor: '#191970',
+                        backgroundColor: 'rgba(25, 25, 112, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        pointBackgroundColor: '#191970',
+                        pointBorderColor: 'white',
+                        pointBorderWidth: 2,
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: '#eceff1'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        });
+
         // Update page title
         const pageTitle = document.getElementById('pageTitle');
         if (pageTitle) {
             pageTitle.textContent = 'Reports';
         }
 
-        // Export type change handler
-        document.querySelectorAll('input[name="export_type"]').forEach(radio => {
-            radio.addEventListener('change', function() {
-                if (this.value === 'partial' && document.getElementById('search').value === '') {
-                    alert('Please enter search terms for partial export, or use Full Export for all records.');
-                }
-            });
-        });
-
-        // Date validation
-        document.getElementById('date_from').addEventListener('change', function() {
-            const dateTo = document.getElementById('date_to');
-            if (dateTo.value && this.value > dateTo.value) {
+        // Form validation
+        document.getElementById('reportForm').addEventListener('submit', function(e) {
+            const dateFrom = document.getElementById('date_from').value;
+            const dateTo = document.getElementById('date_to').value;
+            
+            if (dateFrom && dateTo && dateFrom > dateTo) {
+                e.preventDefault();
                 alert('Date From cannot be later than Date To');
-                this.value = dateTo.value;
-            }
-        });
-
-        document.getElementById('date_to').addEventListener('change', function() {
-            const dateFrom = document.getElementById('date_from');
-            if (dateFrom.value && this.value < dateFrom.value) {
-                alert('Date To cannot be earlier than Date From');
-                this.value = dateFrom.value;
             }
         });
     </script>
