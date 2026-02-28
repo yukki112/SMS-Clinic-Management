@@ -498,13 +498,11 @@
     <div class="accent-circle"></div>
     <div class="container">
       <div class="hero-content">
-        <div class="badge">
-          <i class="fas fa-graduation-cap"></i> <span>grades 11 – 4th year college</span>
-        </div>
+       
         <h1>where health<br>meets<span style="background: #191970; color: #ECEFF1; padding: 0 0.8rem;">academics</span></h1>
         <p>ICARE clinic: digital clearance, instant records, and smart visits — built exclusively for senior high & tertiary students.</p>
         <div class="hero-buttons">
-          <a href="login.php" class="btn btn-primary"><i class="fas fa-shield"></i> staff login</a>
+          <a href="login.php" class="btn btn-primary"><i class="fas fa-shield"></i>login</a>
           <a href="#features" class="btn btn-outline"><i class="fas fa-compass"></i> discover</a>
         </div>
         <!-- subtle stat line -->
@@ -517,7 +515,7 @@
       <!-- ICON GRID – completely rebuilt, structured, no more mess -->
       <div class="icon-showcase">
         <div class="icon-row">
-          <div class="icon-block"><i class="fas fa-file-circle-check"></i><span>clearance</span></div>
+          <div class="icon-block"><i class="fas fa-notes-medical"></i><span>clearance</span></div>
           <div class="icon-block"><i class="fas fa-stethoscope"></i><span>exam</span></div>
         </div>
         <div class="icon-row">
