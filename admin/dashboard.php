@@ -456,237 +456,389 @@ $insights[] = [
         font-weight: 600;
     }
 
-    /* AI Insights Section - Enhanced Premium Design */
+   /* AI-Powered Insights Section - Chatbot Style */
 .insights-section {
     margin-bottom: 30px;
     animation: fadeInUp 0.65s ease;
+    background: white;
+    border-radius: 24px;
+    padding: 24px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+    border: 1px solid #cfd8dc;
     position: relative;
+    overflow: hidden;
 }
 
+/* AI Assistant Header */
 .insights-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 20px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #f0f4f8;
+}
+
+.ai-assistant {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.ai-avatar {
+    width: 56px;
+    height: 56px;
+    background: linear-gradient(135deg, #191970, #4a4ab0);
+    border-radius: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    position: relative;
+    box-shadow: 0 6px 12px rgba(25, 25, 112, 0.2);
+}
+
+.ai-avatar svg {
+    width: 32px;
+    height: 32px;
+}
+
+.ai-status {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    width: 12px;
+    height: 12px;
+    background: #4caf50;
+    border: 2px solid white;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+.ai-info h3 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #191970;
+    margin-bottom: 4px;
+}
+
+.ai-info p {
+    font-size: 0.85rem;
+    color: #78909c;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ai-info p::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    background: #4caf50;
+    border-radius: 50%;
+    display: inline-block;
+    animation: pulse 2s infinite;
+}
+
+.ai-refresh-btn {
+    padding: 8px 16px;
+    background: #f0f4f8;
+    border: 1px solid #cfd8dc;
+    border-radius: 30px;
+    color: #191970;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.3s ease;
+}
+
+.ai-refresh-btn:hover {
+    background: #191970;
+    color: white;
+    border-color: #191970;
+}
+
+.ai-refresh-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* AI Chat Container */
+.ai-chat-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-height: 500px;
+    overflow-y: auto;
+    padding: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: #191970 #e0e0e0;
+}
+
+.ai-chat-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.ai-chat-container::-webkit-scrollbar-track {
+    background: #f0f4f8;
+    border-radius: 10px;
+}
+
+.ai-chat-container::-webkit-scrollbar-thumb {
+    background: #191970;
+    border-radius: 10px;
+}
+
+/* AI Message Bubbles */
+.ai-message {
+    display: flex;
+    gap: 12px;
+    animation: slideInMessage 0.5s ease;
     position: relative;
 }
 
-.insights-header h2 {
-    font-size: 1.3rem;
+@keyframes slideInMessage {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.ai-message-avatar {
+    width: 40px;
+    height: 40px;
+    background: #f0f4f8;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #191970;
+    flex-shrink: 0;
+    border: 1px solid #e0e7ec;
+}
+
+.ai-welcome .ai-message-avatar,
+.ai-summary .ai-message-avatar {
+    background: #191970;
+    color: white;
+}
+
+.insight-avatar {
+    background: var(--msg-color) !important;
+    color: white !important;
+}
+
+.insight-emoji {
+    font-size: 20px;
+}
+
+.ai-message-content {
+    flex: 1;
+    background: #f8fafd;
+    border-radius: 18px;
+    padding: 14px 18px;
+    position: relative;
+    border: 1px solid #e0e7ec;
+}
+
+.ai-message-content::before {
+    content: '';
+    position: absolute;
+    left: -8px;
+    top: 16px;
+    width: 0;
+    height: 0;
+    border-top: 8px solid transparent;
+    border-bottom: 8px solid transparent;
+    border-right: 8px solid #f8fafd;
+}
+
+.ai-welcome .ai-message-content,
+.ai-summary .ai-message-content {
+    background: linear-gradient(135deg, #f0f4fa, #ffffff);
+    border-left: 3px solid #191970;
+}
+
+.ai-message-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.ai-name {
     font-weight: 600;
+    color: #191970;
+    font-size: 0.9rem;
+}
+
+.ai-time {
+    font-size: 0.7rem;
+    color: #90a4ae;
+}
+
+.ai-message-text {
+    font-size: 0.95rem;
+    color: #37474f;
+    line-height: 1.5;
+}
+
+.ai-message-text strong {
+    font-weight: 600;
+}
+
+/* AI Suggestions */
+.ai-suggestion {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: rgba(25, 25, 112, 0.05);
+    border-radius: 12px;
+    font-size: 0.85rem;
     color: #191970;
     display: flex;
     align-items: center;
     gap: 8px;
-    position: relative;
+    border: 1px dashed #19197040;
 }
 
-.insights-header h2::before {
-    content: '';
-    position: absolute;
-    left: -10px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 4px;
-    height: 24px;
-    background: linear-gradient(135deg, #191970, #4a4ab0);
-    border-radius: 4px;
+.ai-suggestion svg {
+    flex-shrink: 0;
 }
 
-.insights-header h2 svg {
-    width: 24px;
-    height: 24px;
-    filter: drop-shadow(0 2px 4px rgba(25, 25, 112, 0.2));
+/* Typing Indicator */
+.ai-typing {
+    display: flex;
+    gap: 4px;
+    margin-top: 8px;
+    padding: 4px 0;
 }
 
-.insights-header span {
-    color: #78909c;
-    font-size: 0.9rem;
-    background: rgba(255, 255, 255, 0.7);
-    padding: 4px 12px;
+.ai-typing span {
+    width: 8px;
+    height: 8px;
+    background: #90a4ae;
+    border-radius: 50%;
+    animation: typing 1.4s infinite;
+}
+
+.ai-typing span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.ai-typing span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes typing {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.5;
+    }
+    30% {
+        transform: translateY(-8px);
+        opacity: 1;
+        background: #191970;
+    }
+}
+
+/* AI Input Area */
+.ai-input-area {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 2px solid #f0f4f8;
+    display: flex;
+    gap: 10px;
+    opacity: 0.7;
+}
+
+.ai-input-area input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 2px solid #e0e7ec;
     border-radius: 30px;
-    border: 1px solid #cfd8dc;
-    backdrop-filter: blur(5px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
-}
-
-.insights-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
-    position: relative;
-}
-
-/* AI Background Glow Effect */
-.insights-section::before {
-    content: '';
-    position: absolute;
-    top: -20px;
-    right: 10%;
-    width: 300px;
-    height: 300px;
-    background: radial-gradient(circle, rgba(25, 25, 112, 0.03) 0%, transparent 70%);
-    border-radius: 50%;
-    pointer-events: none;
-    z-index: 0;
-}
-
-.insight-card {
-    background: white;
-    border-radius: 20px;
-    padding: 24px;
-    position: relative;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
-    border: 1px solid rgba(207, 216, 220, 0.5);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    overflow: hidden;
-    z-index: 1;
-    backdrop-filter: blur(10px);
-}
-
-/* Animated gradient border on hover */
-.insight-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    border-radius: 20px;
-    padding: 2px;
-    background: linear-gradient(135deg, #191970, #4a4ab0, #191970);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-.insight-card:hover::before {
-    opacity: 0.5;
-}
-
-.insight-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 20px 30px -10px rgba(25, 25, 112, 0.15);
-    border-color: transparent;
-}
-
-/* AI Icon Container */
-.insight-icon {
-    font-size: 28px;
-    margin-bottom: 16px;
-    display: inline-block;
-    position: relative;
-}
-
-/* Pulse animation for warning icons */
-.insight-icon[data-type="warning"] {
-    animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.1); }
-    100% { transform: scale(1); }
-}
-
-/* Title with subtle gradient */
-.insight-title {
-    font-size: 1rem;
-    font-weight: 600;
-    color: #191970;
-    margin-bottom: 10px;
-    position: relative;
-    display: inline-block;
-}
-
-/* Message with better readability */
-.insight-message {
     font-size: 0.9rem;
-    color: #546e7a;
-    line-height: 1.5;
-    position: relative;
+    background: #f8fafd;
+    color: #37474f;
 }
 
-/* Small decorative elements */
-.insight-card::after {
-    content: '';
-    position: absolute;
-    bottom: 10px;
-    right: 10px;
-    width: 40px;
-    height: 40px;
-    background: radial-gradient(circle, rgba(25, 25, 112, 0.03) 0%, transparent 70%);
+.ai-input-area input::placeholder {
+    color: #90a4ae;
+    font-style: italic;
+}
+
+.ai-input-area button {
+    width: 48px;
+    height: 48px;
+    background: #e0e7ec;
+    border: none;
     border-radius: 50%;
-    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: not-allowed;
+    color: #90a4ae;
 }
 
-/* Different left border colors based on insight type */
-.insight-card[data-type="trend"] { border-left: 4px solid #191970; }
-.insight-card[data-type="warning"] { border-left: 4px solid #c62828; }
-.insight-card[data-type="info"] { border-left: 4px solid #ed6c02; }
-.insight-card[data-type="health"] { border-left: 4px solid #1565c0; }
-.insight-card[data-type="staff"] { border-left: 4px solid #6b2b5e; }
-.insight-card[data-type="appointment"] { border-left: 4px solid #1976d2; }
-.insight-card[data-type="success"] { border-left: 4px solid #2e7d32; }
-
-/* Loading shimmer effect for cards */
-.insight-card.loading {
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-    background-size: 200% 100%;
-    animation: loading 1.5s infinite;
+.ai-input-area button svg {
+    width: 20px;
+    height: 20px;
 }
 
-@keyframes loading {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+/* Message Animations */
+.ai-message {
+    animation: messagePop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
-/* AI Brain icon animation */
-.insights-header h2 svg {
-    animation: pulse-light 3s infinite;
-}
-
-@keyframes pulse-light {
-    0% { opacity: 0.7; }
-    50% { opacity: 1; }
-    100% { opacity: 0.7; }
-}
-
-/* Responsive adjustments */
-@media (max-width: 1280px) {
-    .insights-grid {
-        grid-template-columns: repeat(2, 1fr);
+@keyframes messagePop {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(-10px);
     }
-    
-    .insights-section::before {
-        width: 200px;
-        height: 200px;
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
     }
 }
 
+/* Pulse Animation for Status */
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 6px rgba(76, 175, 80, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+    }
+}
+
+/* Responsive */
 @media (max-width: 768px) {
-    .insights-grid {
-        grid-template-columns: 1fr;
-    }
-    
     .insights-header {
         flex-direction: column;
         align-items: flex-start;
-        gap: 10px;
+        gap: 12px;
     }
     
-    .insights-section::before {
-        display: none;
+    .ai-assistant {
+        width: 100%;
     }
-}
-
-/* Dark mode support (if needed) */
-@media (prefers-color-scheme: dark) {
-    .insight-card {
-        background: rgba(255, 255, 255, 0.95);
+    
+    .ai-refresh-btn {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .ai-message-content::before {
+        display: none;
     }
 }
     /* Analytics Section */
@@ -1228,39 +1380,125 @@ $insights[] = [
                     </div>
                 </div>
 
-            <!-- AI-Powered Insights Section -->
+         <!-- AI-Powered Insights Section - Chatbot Style -->
 <div class="insights-section">
     <div class="insights-header">
-        <h2>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 16v-4M12 8h.01"/>
-                <path d="M9 9l6 6M15 9l-6 6"/>
-            </svg>
-            AI Neural Insights
-            <span style="font-size: 0.7rem; background: #191970; color: white; padding: 2px 8px; border-radius: 30px; margin-left: 8px;">LIVE</span>
-        </h2>
-        <span style="color: #78909c; font-size: 0.9rem; display: flex; align-items: center; gap: 4px;">
-            <span style="display: inline-block; width: 8px; height: 8px; background: #4caf50; border-radius: 50%; animation: pulse 2s infinite;"></span>
-            Real-time analysis
-        </span>
-    </div>
-    <div class="insights-grid">
-        <?php foreach ($insights as $insight): ?>
-        <div class="insight-card" data-type="<?php echo $insight['type']; ?>" style="border-left-color: <?php echo $insight['color']; ?>">
-            <div class="insight-icon" data-type="<?php echo $insight['type']; ?>"><?php echo $insight['icon']; ?></div>
-            <div class="insight-title"><?php echo $insight['title']; ?></div>
-            <div class="insight-message"><?php echo $insight['message']; ?></div>
-            <!-- Add small AI indicator -->
-            <div style="position: absolute; top: 10px; right: 10px; font-size: 0.6rem; color: #78909c; display: flex; align-items: center; gap: 2px;">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 8v8M8 12h8"/>
+        <div class="ai-assistant">
+            <div class="ai-avatar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="8" r="4"/>
+                    <path d="M5 14v2a7 7 0 0 0 14 0v-2"/>
+                    <circle cx="12" cy="20" r="2" fill="currentColor"/>
                 </svg>
-                <span>AI</span>
+                <span class="ai-status"></span>
+            </div>
+            <div class="ai-info">
+                <h3>Clinic AI Assistant</h3>
+                <p>Analyzing your clinic data in real-time</p>
+            </div>
+        </div>
+        <div class="ai-actions">
+            <button class="ai-refresh-btn" onclick="refreshInsights()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 4v6h-6M1 20v-6h6"/>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- AI Chat Container -->
+    <div class="ai-chat-container">
+        <!-- Welcome Message from AI -->
+        <div class="ai-message ai-welcome">
+            <div class="ai-message-avatar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="8" r="4"/>
+                    <path d="M5 14v2a7 7 0 0 0 14 0v-2"/>
+                </svg>
+            </div>
+            <div class="ai-message-content">
+                <div class="ai-message-header">
+                    <span class="ai-name">Clinic AI</span>
+                    <span class="ai-time">just now</span>
+                </div>
+                <div class="ai-message-text">
+                    Hello! I've analyzed your clinic data and have some insights for you:
+                </div>
+            </div>
+        </div>
+
+        <!-- Dynamic Insights as Chat Bubbles -->
+        <?php foreach ($insights as $index => $insight): ?>
+        <div class="ai-message insight-message" data-type="<?php echo $insight['type']; ?>" style="--msg-color: <?php echo $insight['color']; ?>">
+            <div class="ai-message-avatar insight-avatar" style="background: <?php echo $insight['color']; ?>20; color: <?php echo $insight['color']; ?>">
+                <span class="insight-emoji"><?php echo $insight['icon']; ?></span>
+            </div>
+            <div class="ai-message-content">
+                <div class="ai-message-header">
+                    <span class="ai-name">Insight #<?php echo $index + 1; ?></span>
+                    <span class="ai-time"><?php echo date('h:i A'); ?></span>
+                </div>
+                <div class="ai-message-text">
+                    <strong style="color: <?php echo $insight['color']; ?>"><?php echo $insight['title']; ?>:</strong>
+                    <?php echo $insight['message']; ?>
+                </div>
+                <?php if ($insight['type'] == 'warning'): ?>
+                <div class="ai-suggestion">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    Suggestion: Consider reordering soon
+                </div>
+                <?php elseif ($insight['type'] == 'trend' && strpos($insight['message'], 'busiest') !== false): ?>
+                <div class="ai-suggestion">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                        <path d="M18 20V10M12 20V4M6 20v-6"/>
+                    </svg>
+                    Suggestion: Schedule extra staff on <?php echo explode(' ', $insight['message'])[0]; ?>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
         <?php endforeach; ?>
+
+        <!-- AI Summary Message -->
+        <div class="ai-message ai-summary">
+            <div class="ai-message-avatar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 16v-4M12 8h.01"/>
+                </svg>
+            </div>
+            <div class="ai-message-content">
+                <div class="ai-message-header">
+                    <span class="ai-name">Clinic AI</span>
+                    <span class="ai-time">just now</span>
+                </div>
+                <div class="ai-message-text">
+                    I'll continue monitoring your clinic data. Check back for more insights!
+                </div>
+                <div class="ai-typing">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Input Area (Optional - for future expansion) -->
+    <div class="ai-input-area">
+        <input type="text" placeholder="Ask AI about your clinic data..." disabled>
+        <button disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"/>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+        </button>
     </div>
 </div>
                 <!-- Analytics Section -->
@@ -1541,6 +1779,58 @@ $insights[] = [
         if (pageTitle) {
             pageTitle.textContent = 'Dashboard';
         }
+        // AI Insights Refresh Function
+function refreshInsights() {
+    const button = event.currentTarget;
+    const svg = button.querySelector('svg');
+    
+    // Add spinning animation
+    svg.style.animation = 'spin 1s linear infinite';
+    
+    // Simulate refresh (in production, you'd make an AJAX call)
+    setTimeout(() => {
+        svg.style.animation = '';
+        
+        // Show a new temporary message
+        const chatContainer = document.querySelector('.ai-chat-container');
+        const tempMessage = document.createElement('div');
+        tempMessage.className = 'ai-message';
+        tempMessage.innerHTML = `
+            <div class="ai-message-avatar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="8" r="4"/>
+                    <path d="M5 14v2a7 7 0 0 0 14 0v-2"/>
+                </svg>
+            </div>
+            <div class="ai-message-content">
+                <div class="ai-message-header">
+                    <span class="ai-name">Clinic AI</span>
+                    <span class="ai-time">just now</span>
+                </div>
+                <div class="ai-message-text">
+                    🔄 Data refreshed! New insights are being generated...
+                </div>
+            </div>
+        `;
+        chatContainer.appendChild(tempMessage);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+        
+        // Remove after 3 seconds
+        setTimeout(() => {
+            tempMessage.remove();
+        }, 3000);
+    }, 1500);
+}
+
+// Add spin animation
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+`;
+document.head.appendChild(style);
     </script>
 </body>
 </html>
