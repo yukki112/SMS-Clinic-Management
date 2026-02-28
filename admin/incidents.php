@@ -30,17 +30,28 @@ $current_user_fullname = $user_data ? $user_data['full_name'] : $current_user_na
 
 // Initialize variables
 $student_data = null;
+$reporter_data = null;
 $search_error = '';
+$reporter_search_error = '';
 $student_id_search = isset($_GET['student_id']) ? $_GET['student_id'] : '';
+$reporter_id_search = isset($_GET['reporter_id']) ? $_GET['reporter_id'] : '';
 $success_message = '';
 $error_message = '';
 $show_verification_modal = false;
+$show_reporter_verification_modal = false;
 
 // Check if verification was completed
 if (isset($_SESSION['verified_student_id']) && $_SESSION['verified_student_id'] === $student_id_search) {
     $show_verification_modal = false;
 } elseif (!empty($student_id_search) && !isset($_POST['action'])) {
     $show_verification_modal = true;
+}
+
+// Check if reporter verification was completed
+if (isset($_SESSION['verified_reporter_id']) && $_SESSION['verified_reporter_id'] === $reporter_id_search) {
+    $show_reporter_verification_modal = false;
+} elseif (!empty($reporter_id_search) && !isset($_POST['action'])) {
+    $show_reporter_verification_modal = true;
 }
 
 // Handle verification submission
@@ -56,12 +67,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['verify_access'])) {
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
     
     if ($user && password_verify($password, $user['password'])) {
-        $_SESSION['verified_student_id'] = $_POST['student_id'];
-        header("Location: " . strtok($_SERVER["REQUEST_URI"], '?') . "?student_id=" . urlencode($_POST['student_id']));
+        if (isset($_POST['verify_student'])) {
+            $_SESSION['verified_student_id'] = $_POST['student_id'];
+            header("Location: " . strtok($_SERVER["REQUEST_URI"], '?') . "?student_id=" . urlencode($_POST['student_id']) . "&reporter_id=" . urlencode($reporter_id_search));
+        } elseif (isset($_POST['verify_reporter'])) {
+            $_SESSION['verified_reporter_id'] = $_POST['reporter_id'];
+            header("Location: " . strtok($_SERVER["REQUEST_URI"], '?') . "?student_id=" . urlencode($student_id_search) . "&reporter_id=" . urlencode($_POST['reporter_id']));
+        }
         exit();
     } else {
-        $verification_error = "Invalid password. Access denied.";
-        $show_verification_modal = true;
+        if (isset($_POST['verify_student'])) {
+            $verification_error = "Invalid password. Access denied.";
+            $show_verification_modal = true;
+        } elseif (isset($_POST['verify_reporter'])) {
+            $reporter_verification_error = "Invalid password. Access denied.";
+            $show_reporter_verification_modal = true;
+        }
     }
 }
 
@@ -163,6 +184,13 @@ function sendIncidentNotification($student, $incident_data, $incident_code, $db,
                         <p><span class='label'>Student ID:</span> " . htmlspecialchars($student['student_id']) . "</p>
                         <p><span class='label'>Full Name:</span> " . htmlspecialchars($student['full_name']) . "</p>
                         <p><span class='label'>Grade & Section:</span> Grade " . htmlspecialchars($student['year_level'] ?? 'N/A') . " - " . htmlspecialchars($student['section'] ?? 'N/A') . "</p>
+                    </div>
+                    
+                    <div class='info-box'>
+                        <h3 style='margin-top: 0; color: #1e293b;'>Reporter Information</h3>
+                        <p><span class='label'>Reported By:</span> " . htmlspecialchars($incident_data['reporter_name'] ?? 'N/A') . "</p>
+                        <p><span class='label'>Reporter Type:</span> " . htmlspecialchars($incident_data['reporter_type'] ?? 'N/A') . "</p>
+                        " . (!empty($incident_data['reporter_id']) ? "<p><span class='label'>Reporter ID:</span> " . htmlspecialchars($incident_data['reporter_id']) . "</p>" : "") . "
                     </div>
                     
                     <div class='info-box'>
@@ -338,19 +366,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 $medicine_given = implode(', ', $medicines);
             }
             
+            // Determine reporter info
+            $reporter_name = $_POST['reporter_name'] ?? $_POST['student_name'];
+            $reporter_id = $_POST['reporter_id'] ?? $_POST['student_id'];
+            $reporter_type = $_POST['reporter_type'] ?? 'Student';
+            
             // Insert incident
             $query = "INSERT INTO incidents (
                 incident_code, student_id, student_name, grade_section,
                 parent_name, parent_contact, emergency_email, incident_date, incident_time, 
                 location, incident_type, description, witness, action_taken, 
                 vital_signs, treatment_given, medicine_given, disposition, referred_to,
-                created_by
+                reporter_name, reporter_id, reporter_type, created_by
             ) VALUES (
                 :incident_code, :student_id, :student_name, :grade_section,
                 :parent_name, :parent_contact, :emergency_email, :incident_date, :incident_time, 
                 :location, :incident_type, :description, :witness, :action_taken, 
                 :vital_signs, :treatment_given, :medicine_given, :disposition, :referred_to,
-                :created_by
+                :reporter_name, :reporter_id, :reporter_type, :created_by
             )";
             
             $stmt = $db->prepare($query);
@@ -373,6 +406,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $stmt->bindParam(':medicine_given', $medicine_given);
             $stmt->bindParam(':disposition', $_POST['disposition']);
             $stmt->bindParam(':referred_to', $_POST['referred_to']);
+            $stmt->bindParam(':reporter_name', $reporter_name);
+            $stmt->bindParam(':reporter_id', $reporter_id);
+            $stmt->bindParam(':reporter_type', $reporter_type);
             $stmt->bindParam(':created_by', $current_user_id);
             $stmt->execute();
             
@@ -451,7 +487,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                     'response_time' => $_POST['response_time'] ?? null,
                     'ambulance_called' => $_POST['ambulance_called'] ?? null,
                     'ambulance_time' => $_POST['ambulance_time'] ?? null,
-                    'hospital_referred' => $_POST['hospital_referred'] ?? null
+                    'hospital_referred' => $_POST['hospital_referred'] ?? null,
+                    'reporter_name' => $reporter_name,
+                    'reporter_id' => $reporter_id,
+                    'reporter_type' => $reporter_type
                 ];
                 
                 // Create student data array for email
@@ -535,8 +574,8 @@ try {
     ];
 }
 
-// Search for student if ID provided and verified
-if (!empty($student_id_search) && isset($_SESSION['verified_student_id']) && $_SESSION['verified_student_id'] === $student_id_search && !isset($_POST['action'])) {
+// Function to search for person by ID from API
+function searchPersonById($id) {
     $api_url = "https://ttm.qcprotektado.com/api/students.php";
     
     $ch = curl_init();
@@ -553,34 +592,49 @@ if (!empty($student_id_search) && isset($_SESSION['verified_student_id']) && $_S
         $api_response = json_decode($response, true);
         
         if (isset($api_response['records']) && is_array($api_response['records'])) {
-            $found = false;
-            foreach ($api_response['records'] as $student) {
-                if (isset($student['student_id']) && $student['student_id'] == $student_id_search) {
-                    $student_data = $student;
-                    $found = true;
-                    break;
+            foreach ($api_response['records'] as $person) {
+                if (isset($person['student_id']) && $person['student_id'] == $id) {
+                    return $person;
                 }
             }
-            
-            if (!$found) {
-                $search_error = "Student ID not found in the system.";
-                unset($_SESSION['verified_student_id']);
-            }
-        } else {
-            $search_error = "Unable to fetch student data.";
-            unset($_SESSION['verified_student_id']);
         }
-    } else {
-        $search_error = "Error connecting to student database.";
+    }
+    
+    return null;
+}
+
+// Search for student if ID provided and verified
+if (!empty($student_id_search) && isset($_SESSION['verified_student_id']) && $_SESSION['verified_student_id'] === $student_id_search && !isset($_POST['action'])) {
+    $student_data = searchPersonById($student_id_search);
+    
+    if (!$student_data) {
+        $search_error = "Student ID not found in the system.";
         unset($_SESSION['verified_student_id']);
     }
 } elseif (!empty($student_id_search) && (!isset($_SESSION['verified_student_id']) || $_SESSION['verified_student_id'] !== $student_id_search)) {
     $show_verification_modal = true;
 }
 
+// Search for reporter if ID provided and verified
+if (!empty($reporter_id_search) && isset($_SESSION['verified_reporter_id']) && $_SESSION['verified_reporter_id'] === $reporter_id_search && !isset($_POST['action'])) {
+    $reporter_data = searchPersonById($reporter_id_search);
+    
+    if (!$reporter_data) {
+        $reporter_search_error = "Reporter ID not found in the system.";
+        unset($_SESSION['verified_reporter_id']);
+    }
+} elseif (!empty($reporter_id_search) && (!isset($_SESSION['verified_reporter_id']) || $_SESSION['verified_reporter_id'] !== $reporter_id_search)) {
+    $show_reporter_verification_modal = true;
+}
+
 // Clear verification if no student ID
 if (empty($student_id_search) && isset($_SESSION['verified_student_id'])) {
     unset($_SESSION['verified_student_id']);
+}
+
+// Clear verification if no reporter ID
+if (empty($reporter_id_search) && isset($_SESSION['verified_reporter_id'])) {
+    unset($_SESSION['verified_reporter_id']);
 }
 
 // Get incidents by type
@@ -958,6 +1012,15 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             animation: fadeInUp 0.7s ease;
         }
 
+        /* Search Cards Container */
+        .search-cards-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 30px;
+            animation: fadeInUp 0.7s ease;
+        }
+
         /* Search Card */
         .search-card {
             background: white;
@@ -1176,10 +1239,34 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             border: 1px solid #cfd8dc;
         }
 
+        .reporter-info-bar {
+            background: #e3f2fd;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border: 1px solid #90caf9;
+        }
+
         .student-avatar-sm {
             width: 70px;
             height: 70px;
             background: #191970;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            font-weight: 600;
+            color: white;
+        }
+
+        .reporter-avatar-sm {
+            width: 70px;
+            height: 70px;
+            background: #1565c0;
             border-radius: 12px;
             display: flex;
             align-items: center;
@@ -1196,9 +1283,27 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             margin-bottom: 6px;
         }
 
-        .student-details p {
+        .reporter-details h3 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #1565c0;
+            margin-bottom: 6px;
+        }
+
+        .student-details p, .reporter-details p {
             color: #546e7a;
             font-size: 0.95rem;
+        }
+
+        .reporter-type-badge {
+            background: #bbdefb;
+            color: #1565c0;
+            padding: 4px 12px;
+            border-radius: 30px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-block;
+            margin-top: 8px;
         }
 
         .medical-condition-tag {
@@ -1600,6 +1705,21 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             color: #191970;
         }
 
+        .reporter-info {
+            font-size: 0.85rem;
+            color: #1565c0;
+        }
+
+        .reporter-type-badge-small {
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 2px 8px;
+            border-radius: 30px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+
         .parent-response {
             background: #e8f5e9;
             color: #2e7d32;
@@ -1651,7 +1771,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         }
 
         @media (max-width: 1280px) {
-            .main-grid {
+            .main-grid, .search-cards-container {
                 grid-template-columns: 1fr;
             }
             
@@ -1684,7 +1804,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                 grid-template-columns: repeat(2, 1fr);
             }
             
-            .student-info-bar {
+            .student-info-bar, .reporter-info-bar {
                 flex-direction: column;
                 text-align: center;
             }
@@ -1710,7 +1830,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             <div class="dashboard-container">
                 <div class="welcome-section">
                     <h1>🚑 Incidents & Emergencies</h1>
-                    <p>Document and manage school incidents, minor injuries, and emergency cases with parent notifications.</p>
+                    <p>Document and manage school incidents, minor injuries, and emergency cases with parent notifications. Track who reported the incident.</p>
                 </div>
 
                 <!-- Alert Messages -->
@@ -1784,19 +1904,22 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                     </div>
                 </div>
 
-                <!-- Main Grid -->
-                <div class="main-grid">
-                    <!-- Search Card -->
+                <!-- Search Cards -->
+                <div class="search-cards-container">
+                    <!-- Search Student Card -->
                     <div class="search-card">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="11" cy="11" r="8"/>
-                                <path d="M21 21L16.65 16.65"/>
+                                <circle cx="12" cy="8" r="5"/>
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                             </svg>
-                            Find Student
+                            Find Student Involved
                         </div>
                         
                         <form method="GET" action="" class="search-form">
+                            <?php if (!empty($reporter_id_search)): ?>
+                                <input type="hidden" name="reporter_id" value="<?php echo htmlspecialchars($reporter_id_search); ?>">
+                            <?php endif; ?>
                             <div class="form-group">
                                 <label for="student_id">Student ID</label>
                                 <input type="text" class="form-control" id="student_id" name="student_id" 
@@ -1812,78 +1935,136 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                             </div>
                         <?php endif; ?>
 
-                        <!-- Quick Type Stats -->
-                        <?php if (!empty($stats['by_type'])): ?>
-                            <div style="margin-top: 24px;">
-                                <div style="font-size: 0.9rem; font-weight: 600; color: #191970; margin-bottom: 12px;">
-                                    Incidents by Type (30 days)
+                        <?php if ($student_data && !$search_error): ?>
+                            <div style="margin-top: 20px; padding: 16px; background: #e8f5e9; border-radius: 12px;">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <div style="width: 50px; height: 50px; background: #2e7d32; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600;">
+                                        <?php echo strtoupper(substr($student_data['full_name'] ?? 'NA', 0, 2)); ?>
+                                    </div>
+                                    <div>
+                                        <strong><?php echo htmlspecialchars($student_data['full_name'] ?? 'N/A'); ?></strong><br>
+                                        <small>Grade <?php echo htmlspecialchars($student_data['year_level'] ?? 'N/A'); ?> - <?php echo htmlspecialchars($student_data['section'] ?? 'N/A'); ?></small>
+                                    </div>
                                 </div>
-                                <ul class="type-list">
-                                    <?php foreach ($stats['by_type'] as $type): ?>
-                                        <li class="type-item">
-                                            <span class="type-name">
-                                                <span class="incident-type-badge type-<?php echo strtolower($type['incident_type']); ?>">
-                                                    <?php echo $type['incident_type']; ?>
-                                                </span>
-                                            </span>
-                                            <span class="type-count"><?php echo $type['count']; ?></span>
-                                        </li>
-                                    <?php endforeach; ?>
-                                </ul>
                             </div>
                         <?php endif; ?>
                     </div>
 
-                    <!-- Quick Stats Card -->
-                    <div class="quick-stats-card">
+                    <!-- Search Reporter Card -->
+                    <div class="search-card">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M3 3V21H21"/>
-                                <path d="M7 15L10 11L13 14L20 7"/>
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                <circle cx="12" cy="7" r="4"/>
                             </svg>
-                            Quick Overview
+                            Find Reporter
                         </div>
+                        <p style="color: #546e7a; font-size: 0.85rem; margin-bottom: 15px;">
+                            Who reported the incident? (Teacher, Faculty, Staff, or Student)
+                        </p>
                         
-                        <div style="margin-bottom: 20px;">
-                            <div style="font-size: 0.9rem; color: #546e7a; margin-bottom: 8px;">Total Incidents This Month</div>
-                            <div style="font-size: 2rem; font-weight: 700; color: #191970;">
-                                <?php 
-                                $total = 0;
-                                foreach ($stats['by_type'] as $type) {
-                                    $total += $type['count'];
-                                }
-                                echo $total;
-                                ?>
+                        <form method="GET" action="" class="search-form">
+                            <?php if (!empty($student_id_search)): ?>
+                                <input type="hidden" name="student_id" value="<?php echo htmlspecialchars($student_id_search); ?>">
+                            <?php endif; ?>
+                            <div class="form-group">
+                                <label for="reporter_id">Reporter ID</label>
+                                <input type="text" class="form-control" id="reporter_id" name="reporter_id" 
+                                       placeholder="Enter reporter's ID" 
+                                       value="<?php echo htmlspecialchars($reporter_id_search); ?>" required>
                             </div>
-                        </div>
+                            <button type="submit" class="btn btn-primary">Search Reporter</button>
+                        </form>
 
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                            <div style="background: #eceff1; padding: 16px; border-radius: 12px; text-align: center;">
-                                <div style="font-size: 1.5rem; font-weight: 700; color: #e65100;"><?php echo count($incidents_minor); ?></div>
-                                <div style="font-size: 0.8rem; color: #546e7a;">Minor Injuries</div>
+                        <?php if ($reporter_search_error): ?>
+                            <div style="margin-top: 15px; padding: 12px; background: #ffebee; border-radius: 12px; color: #c62828; font-size: 0.9rem;">
+                                <?php echo $reporter_search_error; ?>
                             </div>
-                            <div style="background: #eceff1; padding: 16px; border-radius: 12px; text-align: center;">
-                                <div style="font-size: 1.5rem; font-weight: 700; color: #c62828;"><?php echo count($incidents_emergency); ?></div>
-                                <div style="font-size: 0.8rem; color: #546e7a;">Emergencies</div>
-                            </div>
-                        </div>
+                        <?php endif; ?>
 
-                        <div style="margin-top: 20px;">
-                            <div style="font-size: 0.9rem; font-weight: 600; color: #191970; margin-bottom: 12px;">
-                                Common Locations
+                        <?php if ($reporter_data && !$reporter_search_error): ?>
+                            <div style="margin-top: 20px; padding: 16px; background: #e3f2fd; border-radius: 12px;">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <div style="width: 50px; height: 50px; background: #1565c0; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600;">
+                                        <?php echo strtoupper(substr($reporter_data['full_name'] ?? 'NA', 0, 2)); ?>
+                                    </div>
+                                    <div>
+                                        <strong><?php echo htmlspecialchars($reporter_data['full_name'] ?? 'N/A'); ?></strong><br>
+                                        <?php if (isset($reporter_data['role'])): ?>
+                                            <span class="reporter-type-badge-small"><?php echo htmlspecialchars($reporter_data['role']); ?></span>
+                                        <?php else: ?>
+                                            <span class="reporter-type-badge-small">Student</span>
+                                        <?php endif; ?>
+                                        <small style="color: #546e7a; display: block;">
+                                            <?php if (!empty($reporter_data['year_level'])): ?>
+                                                Grade <?php echo htmlspecialchars($reporter_data['year_level']); ?> - <?php echo htmlspecialchars($reporter_data['section']); ?>
+                                            <?php else: ?>
+                                                Faculty/Staff
+                                            <?php endif; ?>
+                                        </small>
+                                    </div>
+                                </div>
                             </div>
-                            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                                <span class="incident-type-badge type-incident">Gym</span>
-                                <span class="incident-type-badge type-incident">Classroom</span>
-                                <span class="incident-type-badge type-incident">Hallway</span>
-                                <span class="incident-type-badge type-incident">Field</span>
-                                <span class="incident-type-badge type-incident">Canteen</span>
-                            </div>
-                        </div>
+                        <?php endif; ?>
                     </div>
                 </div>
 
-                <?php if ($student_data): ?>
+                <!-- Quick Stats Card -->
+                <div class="quick-stats-card" style="margin-bottom: 30px;">
+                    <div class="card-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 3V21H21"/>
+                            <path d="M7 15L10 11L13 14L20 7"/>
+                        </svg>
+                        Quick Overview
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <div style="font-size: 0.9rem; color: #546e7a; margin-bottom: 8px;">Total Incidents This Month</div>
+                        <div style="font-size: 2rem; font-weight: 700; color: #191970;">
+                            <?php 
+                            $total = 0;
+                            foreach ($stats['by_type'] as $type) {
+                                $total += $type['count'];
+                            }
+                            echo $total;
+                            ?>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div style="background: #eceff1; padding: 16px; border-radius: 12px; text-align: center;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #e65100;"><?php echo count($incidents_minor); ?></div>
+                            <div style="font-size: 0.8rem; color: #546e7a;">Minor Injuries</div>
+                        </div>
+                        <div style="background: #eceff1; padding: 16px; border-radius: 12px; text-align: center;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #c62828;"><?php echo count($incidents_emergency); ?></div>
+                            <div style="font-size: 0.8rem; color: #546e7a;">Emergencies</div>
+                        </div>
+                    </div>
+
+                    <?php if (!empty($stats['by_type'])): ?>
+                        <div style="margin-top: 20px;">
+                            <div style="font-size: 0.9rem; font-weight: 600; color: #191970; margin-bottom: 12px;">
+                                Incidents by Type (30 days)
+                            </div>
+                            <ul class="type-list">
+                                <?php foreach ($stats['by_type'] as $type): ?>
+                                    <li class="type-item">
+                                        <span class="type-name">
+                                            <span class="incident-type-badge type-<?php echo strtolower($type['incident_type']); ?>">
+                                                <?php echo $type['incident_type']; ?>
+                                            </span>
+                                        </span>
+                                        <span class="type-count"><?php echo $type['count']; ?></span>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+                <?php if ($student_data && $reporter_data): ?>
                 <!-- Incident Form -->
                 <div class="incident-form-card">
                     <div class="card-title">
@@ -1895,6 +2076,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         Log New Incident / Emergency
                     </div>
 
+                    <!-- Student Info -->
                     <div class="student-info-bar">
                         <div class="student-avatar-sm">
                             <?php echo strtoupper(substr($student_data['full_name'] ?? 'NA', 0, 2)); ?>
@@ -1950,12 +2132,45 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         </div>
                     </div>
 
+                    <!-- Reporter Info -->
+                    <div class="reporter-info-bar">
+                        <div class="reporter-avatar-sm">
+                            <?php echo strtoupper(substr($reporter_data['full_name'] ?? 'NA', 0, 2)); ?>
+                        </div>
+                        <div class="reporter-details">
+                            <h3>Reported By: <?php echo htmlspecialchars($reporter_data['full_name'] ?? 'N/A'); ?></h3>
+                            <p>
+                                ID: <?php echo htmlspecialchars($reporter_data['student_id']); ?>
+                            </p>
+                            <?php if (isset($reporter_data['role'])): ?>
+                                <span class="reporter-type-badge"><?php echo htmlspecialchars($reporter_data['role']); ?></span>
+                            <?php else: ?>
+                                <span class="reporter-type-badge">Student</span>
+                            <?php endif; ?>
+                            
+                            <?php if (!empty($reporter_data['year_level'])): ?>
+                                <span style="color: #546e7a; font-size: 0.9rem; display: block; margin-top: 4px;">
+                                    Grade <?php echo htmlspecialchars($reporter_data['year_level']); ?> - <?php echo htmlspecialchars($reporter_data['section']); ?>
+                                </span>
+                            <?php else: ?>
+                                <span style="color: #546e7a; font-size: 0.9rem; display: block; margin-top: 4px;">
+                                    Faculty / Staff
+                                </span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
                     <form method="POST" action="" id="incidentForm">
                         <input type="hidden" name="action" value="save_incident">
                         <input type="hidden" name="student_id" value="<?php echo htmlspecialchars($student_data['student_id']); ?>">
                         <input type="hidden" name="student_name" value="<?php echo htmlspecialchars($student_data['full_name']); ?>">
                         <input type="hidden" name="grade_section" value="Grade <?php echo htmlspecialchars($student_data['year_level'] ?? 'N/A'); ?> - <?php echo htmlspecialchars($student_data['section'] ?? 'N/A'); ?>">
                         <input type="hidden" name="emergency_email" id="emergency_email" value="<?php echo htmlspecialchars($student_data['emergency_email'] ?? ''); ?>">
+                        
+                        <!-- Reporter Information -->
+                        <input type="hidden" name="reporter_id" value="<?php echo htmlspecialchars($reporter_data['student_id']); ?>">
+                        <input type="hidden" name="reporter_name" value="<?php echo htmlspecialchars($reporter_data['full_name']); ?>">
+                        <input type="hidden" name="reporter_type" value="<?php echo isset($reporter_data['role']) ? htmlspecialchars($reporter_data['role']) : 'Student'; ?>">
 
                         <!-- Incident Type Selection -->
                         <div class="incident-type-grid">
@@ -2242,6 +2457,24 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         </button>
                     </form>
                 </div>
+                <?php elseif ($student_data && !$reporter_data): ?>
+                <div class="alert alert-info" style="margin-top: 20px;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="12" x2="12" y2="16"/>
+                        <line x1="12" y1="8" x2="12.01" y2="8"/>
+                    </svg>
+                    Please search for the reporter (teacher, faculty, or student who reported the incident) to continue.
+                </div>
+                <?php elseif ($reporter_data && !$student_data): ?>
+                <div class="alert alert-info" style="margin-top: 20px;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="12" x2="12" y2="16"/>
+                        <line x1="12" y1="8" x2="12.01" y2="8"/>
+                    </svg>
+                    Please search for the student involved to continue.
+                </div>
                 <?php endif; ?>
 
                 <!-- Tabs Section for Incident Lists -->
@@ -2270,6 +2503,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                                 <th>Student</th>
                                                 <th>Date/Time</th>
                                                 <th>Type</th>
+                                                <th>Reported By</th>
                                                 <th>Location</th>
                                                 <th>Description</th>
                                                 <th>Parent Contact</th>
@@ -2292,6 +2526,16 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                                     <td>
                                                         <span class="incident-type-badge type-<?php echo strtolower($incident['incident_type']); ?>">
                                                             <?php echo $incident['incident_type']; ?>
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <span class="reporter-info">
+                                                            <?php echo htmlspecialchars($incident['reporter_name'] ?? $incident['student_name']); ?><br>
+                                                            <small>
+                                                                <span class="reporter-type-badge-small">
+                                                                    <?php echo htmlspecialchars($incident['reporter_type'] ?? 'Student'); ?>
+                                                                </span>
+                                                            </small>
                                                         </span>
                                                     </td>
                                                     <td><?php echo htmlspecialchars($incident['location']); ?></td>
@@ -2340,6 +2584,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                                 <th>Incident Code</th>
                                                 <th>Student</th>
                                                 <th>Date/Time</th>
+                                                <th>Reported By</th>
                                                 <th>Location</th>
                                                 <th>Vital Signs</th>
                                                 <th>Action Taken</th>
@@ -2358,6 +2603,11 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                                     <td>
                                                         <?php echo date('M d, Y', strtotime($incident['incident_date'])); ?><br>
                                                         <small><?php echo date('h:i A', strtotime($incident['incident_time'])); ?></small>
+                                                    </td>
+                                                    <td>
+                                                        <span class="reporter-info">
+                                                            <?php echo htmlspecialchars($incident['reporter_name'] ?? $incident['student_name']); ?>
+                                                        </span>
                                                     </td>
                                                     <td><?php echo htmlspecialchars($incident['location']); ?></td>
                                                     <td>
@@ -2398,6 +2648,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                                 <th>Incident Code</th>
                                                 <th>Student</th>
                                                 <th>Date/Time</th>
+                                                <th>Reported By</th>
                                                 <th>Injury</th>
                                                 <th>Treatment</th>
                                                 <th>Medicine Given</th>
@@ -2416,6 +2667,11 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                                     <td>
                                                         <?php echo date('M d, Y', strtotime($incident['incident_date'])); ?><br>
                                                         <small><?php echo date('h:i A', strtotime($incident['incident_time'])); ?></small>
+                                                    </td>
+                                                    <td>
+                                                        <span class="reporter-info">
+                                                            <?php echo htmlspecialchars($incident['reporter_name'] ?? $incident['student_name']); ?>
+                                                        </span>
                                                     </td>
                                                     <td><?php echo htmlspecialchars(substr($incident['description'], 0, 30)); ?></td>
                                                     <td><?php echo htmlspecialchars($incident['treatment_given']); ?></td>
@@ -2453,6 +2709,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                                 <th>Incident Code</th>
                                                 <th>Student</th>
                                                 <th>Date/Time</th>
+                                                <th>Reported By</th>
                                                 <th>Location</th>
                                                 <th>Incident</th>
                                                 <th>Witness</th>
@@ -2471,6 +2728,11 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                                     <td>
                                                         <?php echo date('M d, Y', strtotime($incident['incident_date'])); ?><br>
                                                         <small><?php echo date('h:i A', strtotime($incident['incident_time'])); ?></small>
+                                                    </td>
+                                                    <td>
+                                                        <span class="reporter-info">
+                                                            <?php echo htmlspecialchars($incident['reporter_name'] ?? $incident['student_name']); ?>
+                                                        </span>
                                                     </td>
                                                     <td><?php echo htmlspecialchars($incident['location']); ?></td>
                                                     <td><?php echo htmlspecialchars(substr($incident['description'], 0, 30)); ?></td>
@@ -2497,7 +2759,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         </div>
     </div>
 
-    <!-- Security Verification Modal -->
+    <!-- Security Verification Modal for Student -->
     <?php if ($show_verification_modal && !empty($student_id_search)): ?>
     <div class="modal-overlay" id="verificationModal">
         <div class="modal-container">
@@ -2526,6 +2788,10 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             
             <form method="POST" action="" class="modal-form">
                 <input type="hidden" name="student_id" value="<?php echo htmlspecialchars($student_id_search); ?>">
+                <input type="hidden" name="verify_student" value="1">
+                <?php if (!empty($reporter_id_search)): ?>
+                    <input type="hidden" name="reporter_id" value="<?php echo htmlspecialchars($reporter_id_search); ?>">
+                <?php endif; ?>
                 <div class="form-group">
                     <label for="password">Enter Your Password to Continue</label>
                     <input type="password" class="form-control" id="password" name="password" 
@@ -2541,43 +2807,57 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             </p>
         </div>
     </div>
-    
-    <script>
-        // Prevent background scrolling when modal is open
-        document.body.style.overflow = 'hidden';
-        
-        function cancelAccess() {
-            window.location.href = window.location.pathname; // Redirect to same page without query string
-        }
-        
-        // Close modal when clicking outside
-        document.getElementById('verificationModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                cancelAccess();
-            }
-        });
-    </script>
     <?php endif; ?>
 
-    <!-- Template for item row -->
-    <template id="item-row-template">
-        <div class="item-row">
-            <select name="items_used[]" class="form-control item-select" onchange="updateStockInfo(this)" required>
-                <option value="">Select item</option>
-                <?php foreach ($clinic_stock as $item): ?>
-                    <option value="<?php echo $item['id']; ?>" 
-                            data-stock="<?php echo $item['quantity']; ?>"
-                            data-unit="<?php echo $item['unit']; ?>">
-                        <?php echo htmlspecialchars($item['item_name']); ?> (<?php echo $item['category']; ?>) - Stock: <?php echo $item['quantity']; ?> <?php echo $item['unit']; ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-            <input type="number" name="item_quantity[]" class="form-control item-quantity" 
-                   placeholder="Quantity" min="1" step="1" required onchange="validateQuantity(this)">
-            <div class="item-stock" id="stock-info"></div>
-            <button type="button" class="remove-item" onclick="removeItemRow(this)">✕</button>
+    <!-- Security Verification Modal for Reporter -->
+    <?php if ($show_reporter_verification_modal && !empty($reporter_id_search)): ?>
+    <div class="modal-overlay" id="reporterVerificationModal">
+        <div class="modal-container">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+            </div>
+            <h2 class="modal-title">Secure Access Required</h2>
+            <p class="modal-subtitle">
+                You are verifying the reporter's identity<br>
+                <strong>Reporter ID: <?php echo htmlspecialchars($reporter_id_search); ?></strong>
+            </p>
+            
+            <?php if (isset($reporter_verification_error)): ?>
+                <div class="modal-error">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <?php echo $reporter_verification_error; ?>
+                </div>
+            <?php endif; ?>
+            
+            <form method="POST" action="" class="modal-form">
+                <input type="hidden" name="reporter_id" value="<?php echo htmlspecialchars($reporter_id_search); ?>">
+                <input type="hidden" name="verify_reporter" value="1">
+                <?php if (!empty($student_id_search)): ?>
+                    <input type="hidden" name="student_id" value="<?php echo htmlspecialchars($student_id_search); ?>">
+                <?php endif; ?>
+                <div class="form-group">
+                    <label for="password_reporter">Enter Your Password to Continue</label>
+                    <input type="password" class="form-control" id="password_reporter" name="password" 
+                           placeholder="••••••••" required autofocus>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn secondary" onclick="cancelReporterAccess()">Cancel</button>
+                    <button type="submit" name="verify_access" class="modal-btn primary">Verify & Access</button>
+                </div>
+            </form>
+            <p style="text-align: center; margin-top: 20px; font-size: 0.8rem; color: #546e7a;">
+                This helps us maintain confidentiality of school personnel records
+            </p>
         </div>
-    </template>
+    </div>
+    <?php endif; ?>
 
     <script>
         let itemCount = 0;
@@ -2715,6 +2995,60 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         document.addEventListener('DOMContentLoaded', function() {
             addItemRow();
         });
+
+        // Cancel access functions
+        function cancelAccess() {
+            window.location.href = window.location.pathname; // Redirect to same page without query string
+        }
+
+        function cancelReporterAccess() {
+            window.location.href = window.location.pathname; // Redirect to same page without query string
+        }
+
+        // Close modal when clicking outside (Student modal)
+        const studentModal = document.getElementById('verificationModal');
+        if (studentModal) {
+            studentModal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    cancelAccess();
+                }
+            });
+        }
+
+        // Close modal when clicking outside (Reporter modal)
+        const reporterModal = document.getElementById('reporterVerificationModal');
+        if (reporterModal) {
+            reporterModal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    cancelReporterAccess();
+                }
+            });
+        }
+
+        // Prevent background scrolling when modals are open
+        if (document.getElementById('verificationModal') || document.getElementById('reporterVerificationModal')) {
+            document.body.style.overflow = 'hidden';
+        }
     </script>
+
+    <!-- Template for item row -->
+    <template id="item-row-template">
+        <div class="item-row">
+            <select name="items_used[]" class="form-control item-select" onchange="updateStockInfo(this)" required>
+                <option value="">Select item</option>
+                <?php foreach ($clinic_stock as $item): ?>
+                    <option value="<?php echo $item['id']; ?>" 
+                            data-stock="<?php echo $item['quantity']; ?>"
+                            data-unit="<?php echo $item['unit']; ?>">
+                        <?php echo htmlspecialchars($item['item_name']); ?> (<?php echo $item['category']; ?>) - Stock: <?php echo $item['quantity']; ?> <?php echo $item['unit']; ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <input type="number" name="item_quantity[]" class="form-control item-quantity" 
+                   placeholder="Quantity" min="1" step="1" required onchange="validateQuantity(this)">
+            <div class="item-stock" id="stock-info"></div>
+            <button type="button" class="remove-item" onclick="removeItemRow(this)">✕</button>
+        </div>
+    </template>
 </body>
 </html>
