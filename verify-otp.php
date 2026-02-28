@@ -3,75 +3,100 @@ session_start();
 require_once 'config/database.php';
 require_once 'config/otp_helper.php';
 
-// Redirect if already logged in
-if (isset($_SESSION['user_id'])) {
-    if ($_SESSION['role'] === 'superadmin') {
-        header('Location: superadmin/dashboard.php');
-    } elseif ($_SESSION['role'] === 'nurse') {
-        header('Location: nurse/dashboard.php');
-    } elseif (in_array($_SESSION['role'], ['admin', 'staff'])) {
-        header('Location: admin/dashboard.php');
-    }
+// Check if user is in OTP verification stage
+if (!isset($_SESSION['otp_user_id']) || !isset($_SESSION['otp_email']) || !isset($_SESSION['otp_full_name'])) {
+    header('Location: login.php');
     exit();
 }
 
-$error = '';
+$database = new Database();
+$db = $database->getConnection();
+$otpHelper = new OTPHelper($db);
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $database = new Database();
-    $db = $database->getConnection();
-    $otpHelper = new OTPHelper($db);
+$error = '';
+$success = '';
+
+// Resend OTP
+if (isset($_POST['resend'])) {
+    $otp = $otpHelper->generateOTP($_SESSION['otp_user_id'], $_SESSION['otp_email']);
     
-    $username = trim($_POST['username']);
-    $password = $_POST['password'];
-    
-    if (empty($username) || empty($password)) {
-        $error = 'Please enter username/email and password';
+    if ($otpHelper->sendOTPEmail($_SESSION['otp_email'], $_SESSION['otp_full_name'], $otp)) {
+        $success = 'A new verification code has been sent to your email.';
     } else {
-        $query = "SELECT * FROM users WHERE (username = :username OR email = :username) AND role IN ('admin', 'superadmin', 'staff', 'nurse')";
-        $stmt = $db->prepare($query);
-        $stmt->bindParam(':username', $username);
-        $stmt->execute();
-        
-        if ($user = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            if (password_verify($password, $user['password'])) {
-                
-                // --- START OTP IMPLEMENTATION ---
-                // Generate and send OTP
-                $otp = $otpHelper->generateOTP($user['id'], $user['email']);
-                
-                if ($otpHelper->sendOTPEmail($user['email'], $user['full_name'], $otp)) {
-                    // Store user data in session for OTP verification
-                    $_SESSION['otp_user_id'] = $user['id'];
-                    $_SESSION['otp_username'] = $user['username'];
-                    $_SESSION['otp_full_name'] = $user['full_name'];
-                    $_SESSION['otp_email'] = $user['email'];
-                    $_SESSION['otp_role'] = $user['role'];
-                    
-                    // Redirect to OTP verification page
-                    header('Location: verify-otp.php');
-                    exit();
-                } else {
-                    $error = 'Failed to send verification code. Please try again.';
-                }
-                // --- END OTP IMPLEMENTATION ---
-                
+        $error = 'Failed to send verification code. Please try again.';
+    }
+}
+
+// Verify OTP
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['verify'])) {
+    $otp = trim($_POST['otp']);
+    
+    if (empty($otp)) {
+        $error = 'Please enter the verification code.';
+    } elseif (!preg_match('/^[0-9]{6}$/', $otp)) {
+        $error = 'Please enter a valid 6-digit code.';
+    } else {
+        if ($otpHelper->verifyOTP($_SESSION['otp_user_id'], $otp)) {
+            // OTP verified - complete login
+            $_SESSION['user_id'] = $_SESSION['otp_user_id'];
+            $_SESSION['username'] = $_SESSION['otp_username'];
+            $_SESSION['full_name'] = $_SESSION['otp_full_name'];
+            $_SESSION['email'] = $_SESSION['otp_email'];
+            $_SESSION['role'] = $_SESSION['otp_role'];
+            $_SESSION['login_time'] = time();
+            
+            // Create session record
+            $session_token = bin2hex(random_bytes(32));
+            $ip_address = $_SERVER['REMOTE_ADDR'];
+            $user_agent = $_SERVER['HTTP_USER_AGENT'];
+            $expires_at = date('Y-m-d H:i:s', strtotime('+24 hours'));
+            
+            $session_query = "INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, expires_at) 
+                              VALUES (:user_id, :session_token, :ip_address, :user_agent, :expires_at)";
+            $session_stmt = $db->prepare($session_query);
+            $session_stmt->bindParam(':user_id', $_SESSION['otp_user_id']);
+            $session_stmt->bindParam(':session_token', $session_token);
+            $session_stmt->bindParam(':ip_address', $ip_address);
+            $session_stmt->bindParam(':user_agent', $user_agent);
+            $session_stmt->bindParam(':expires_at', $expires_at);
+            $session_stmt->execute();
+            
+            $_SESSION['session_token'] = $session_token;
+            
+            // Clean up OTP session data
+            unset($_SESSION['otp_user_id']);
+            unset($_SESSION['otp_username']);
+            unset($_SESSION['otp_full_name']);
+            unset($_SESSION['otp_email']);
+            unset($_SESSION['otp_role']);
+            
+            // Clean up expired OTPs
+            $otpHelper->cleanupExpiredOTPs();
+            
+            // Redirect based on role
+            if ($_SESSION['role'] === 'superadmin') {
+                header('Location: superadmin/dashboard.php');
+            } elseif ($_SESSION['role'] === 'nurse') {
+                header('Location: nurse/dashboard.php');
             } else {
-                $error = 'Invalid password!';
+                header('Location: admin/dashboard.php');
             }
+            exit();
         } else {
-            $error = 'User not found!';
+            $error = 'Invalid or expired verification code. Please try again.';
         }
     }
 }
+
+// Auto cleanup on page load
+$otpHelper->cleanupExpiredOTPs();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ICARE · staff login</title>
-    <!-- same fonts & icons as landing page -->
+    <title>Verify OTP · ICARE</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
@@ -95,7 +120,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             overflow-x: hidden;
         }
 
-        /* subtle floating shapes (same as landing page) */
         .bg-shape {
             position: absolute;
             width: 500px;
@@ -132,10 +156,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             100% { transform: translate(50px, 30px) rotate(-18deg); }
         }
 
-        /* main login card — matches landing card aesthetic */
         .auth-container {
             width: 100%;
-            max-width: 480px;
+            max-width: 500px;
             padding: 1.5rem;
             position: relative;
             z-index: 10;
@@ -156,7 +179,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             transform: scale(1.01);
         }
 
-        /* logo + wordmark exactly as landing */
         .logo-wrapper {
             display: flex;
             align-items: center;
@@ -188,11 +210,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
         .auth-header {
             text-align: center;
-            margin-bottom: 2.5rem;
+            margin-bottom: 1.5rem;
         }
 
         .auth-header h2 {
-            font-size: 2.2rem;
+            font-size: 2rem;
             font-weight: 700;
             color: #191970;
             margin-bottom: 0.4rem;
@@ -201,17 +223,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .auth-header p {
             color: #191970;
             opacity: 0.7;
-            font-size: 1rem;
-            font-weight: 500;
+            font-size: 0.95rem;
         }
 
-        /* alert styling */
+        .email-info {
+            background: rgba(25, 25, 112, 0.05);
+            padding: 1rem;
+            border-radius: 50px;
+            text-align: center;
+            margin-bottom: 1.5rem;
+            font-weight: 500;
+            border: 1px solid rgba(25, 25, 112, 0.1);
+        }
+
+        .email-info i {
+            margin-right: 0.5rem;
+            color: #191970;
+        }
+
+        .email-info span {
+            font-weight: 600;
+            color: #191970;
+        }
+
         .alert {
             padding: 1.1rem 1.5rem;
             border-radius: 100px;
             font-size: 0.95rem;
             font-weight: 500;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
             display: flex;
             align-items: center;
             gap: 0.8rem;
@@ -235,7 +275,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             font-size: 1.3rem;
         }
 
-        /* form */
         .auth-form {
             display: flex;
             flex-direction: column;
@@ -280,6 +319,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             background: white;
             color: #191970;
             transition: all 0.2s ease;
+            text-align: center;
+            letter-spacing: 4px;
+            font-size: 1.5rem;
         }
 
         .input-wrapper input:focus {
@@ -291,31 +333,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
         .input-wrapper input::placeholder {
             color: #191970;
-            opacity: 0.4;
+            opacity: 0.3;
             font-weight: 400;
+            letter-spacing: normal;
+            font-size: 1rem;
         }
 
-        .forgot-row {
-            display: flex;
-            justify-content: flex-end;
-            margin-top: -0.8rem;
-        }
-
-        .forgot-link {
+        .timer {
+            text-align: center;
+            font-size: 0.95rem;
             color: #191970;
-            font-size: 0.9rem;
-            font-weight: 600;
-            text-decoration: none;
             opacity: 0.7;
-            transition: opacity 0.2s;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.3rem;
+            margin-top: -0.5rem;
         }
 
-        .forgot-link:hover {
-            opacity: 1;
-            text-decoration: underline;
+        .timer i {
+            margin-right: 0.3rem;
         }
 
         .btn {
@@ -345,11 +378,49 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             box-shadow: 0 25px 35px -12px #191970;
         }
 
+        .btn-outline {
+            background: transparent;
+            color: #191970;
+            border: 2px solid rgba(25, 25, 112, 0.3);
+            box-shadow: none;
+        }
+
+        .btn-outline:hover {
+            border-color: #191970;
+            background: rgba(25, 25, 112, 0.05);
+            transform: translateY(-2px);
+        }
+
         .btn-block {
             width: 100%;
         }
 
-        /* back link */
+        .resend-link {
+            text-align: center;
+            margin-top: 1rem;
+        }
+
+        .resend-link form {
+            display: inline;
+        }
+
+        .resend-btn {
+            background: none;
+            border: none;
+            color: #191970;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        .resend-btn:hover {
+            opacity: 1;
+        }
+
         .back-link {
             text-align: center;
             margin-top: 2rem;
@@ -359,7 +430,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             color: #191970;
             font-weight: 600;
             text-decoration: none;
-            font-size: 1rem;
+            font-size: 0.95rem;
             opacity: 0.7;
             display: inline-flex;
             align-items: center;
@@ -371,42 +442,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             opacity: 1;
         }
 
-        /* role badges (discreet, matches design) */
-        .role-hint {
-            margin-top: 2.5rem;
-            padding-top: 1.5rem;
-            border-top: 2px solid rgba(25, 25, 112, 0.1);
-            text-align: center;
-        }
-
-        .role-hint p {
-            font-size: 0.85rem;
-            font-weight: 500;
-            color: #191970;
-            opacity: 0.5;
-            margin-bottom: 0.8rem;
-            letter-spacing: 0.3px;
-        }
-
-        .role-badges {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-            justify-content: center;
-        }
-
-        .role-badge {
-            background: rgba(25, 25, 112, 0.05);
-            border: 1px solid rgba(25, 25, 112, 0.2);
-            padding: 0.3rem 1rem;
-            border-radius: 60px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            color: #191970;
-            backdrop-filter: blur(2px);
-        }
-
-        /* responsive */
         @media (max-width: 500px) {
             .auth-card { padding: 2rem 1.5rem; }
             .logo-text { font-size: 2rem; }
@@ -415,21 +450,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     </style>
 </head>
 <body>
-    <!-- floating background shapes (same as landing) -->
     <div class="bg-shape"></div>
     <div class="bg-shape-two"></div>
 
     <div class="auth-container">
         <div class="auth-card">
-            <!-- logo identical to landing page -->
             <div class="logo-wrapper">
                 <img src="assets/images/clinic.png" alt="ICARE" class="logo-img" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'56\' height=\'56\' viewBox=\'0 0 24 24\' fill=\'%23191970\'%3E%3Cpath d=\'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z\'/%3E%3C/svg%3E';">
                 <span class="logo-text">ICARE<span>clinic</span></span>
             </div>
 
             <div class="auth-header">
-                <h2>Sign In</h2>
-              
+                <h2>Verification</h2>
+                <p>Enter the 6-digit code sent to your email</p>
+            </div>
+
+            <div class="email-info">
+                <i class="fas fa-envelope"></i>
+                Code sent to: <span><?php echo htmlspecialchars($_SESSION['otp_email']); ?></span>
             </div>
             
             <?php if ($error): ?>
@@ -439,52 +477,66 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 </div>
             <?php endif; ?>
             
-            <?php if (isset($_GET['registered'])): ?>
+            <?php if ($success): ?>
                 <div class="alert alert-success">
                     <i class="fas fa-check-circle"></i>
-                    Registration successful! Please login.
-                </div>
-            <?php endif; ?>
-            
-            <?php if (isset($_GET['session_expired'])): ?>
-                <div class="alert alert-error">
-                    <i class="fas fa-clock"></i>
-                    Your session has expired. Please login again.
+                    <?php echo htmlspecialchars($success); ?>
                 </div>
             <?php endif; ?>
             
             <form method="POST" action="" class="auth-form">
                 <div class="form-group">
-                    <label for="username"><i class="far fa-user" style="margin-right: 0.3rem;"></i>Username or email</label>
-                    <div class="input-wrapper">
-                        <i class="fas fa-id-card"></i>
-                        <input type="text" id="username" name="username" placeholder="e.g., nurse_maria" value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>" required>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="password"><i class="fas fa-lock" style="margin-right: 0.3rem;"></i>Password</label>
+                    <label for="otp"><i class="fas fa-shield-halved"></i> Verification Code</label>
                     <div class="input-wrapper">
                         <i class="fas fa-key"></i>
-                        <input type="password" id="password" name="password" placeholder="··········" required>
+                        <input type="text" id="otp" name="otp" placeholder="000000" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="off" required>
                     </div>
                 </div>
 
-                <div class="forgot-row">
-                    <a href="forgot-password.php" class="forgot-link"><i class="fas fa-chevron-right"></i> forgot password?</a>
+                <div class="timer" id="timer">
+                    <i class="far fa-clock"></i>
+                    Code expires in <span id="countdown">02:00</span>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-block">
-                    <i class="fas fa-arrow-right-to-bracket"></i> sign in
+                <button type="submit" name="verify" class="btn btn-primary btn-block">
+                    <i class="fas fa-check-circle"></i> verify & continue
                 </button>
             </form>
 
-            <div class="back-link">
-                <a href="index.php"><i class="fas fa-chevron-left"></i> back to home</a>
+            <div class="resend-link">
+                <form method="POST" action="">
+                    <button type="submit" name="resend" class="resend-btn">
+                        <i class="fas fa-rotate-right"></i> resend code
+                    </button>
+                </form>
             </div>
 
-           
+            <div class="back-link">
+                <a href="login.php"><i class="fas fa-chevron-left"></i> back to login</a>
+            </div>
         </div>
     </div>
+
+    <script>
+        // Countdown timer for OTP expiry (2 minutes = 120 seconds)
+        let timeLeft = 120;
+        const countdownEl = document.getElementById('countdown');
+        
+        function updateCountdown() {
+            const minutes = Math.floor(timeLeft / 60);
+            const seconds = timeLeft % 60;
+            countdownEl.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            
+            if (timeLeft > 0) {
+                timeLeft--;
+            } else {
+                countdownEl.textContent = '00:00';
+                document.querySelector('.timer').style.color = '#b71c1c';
+            }
+        }
+        
+        updateCountdown();
+        setInterval(updateCountdown, 1000);
+    </script>
 </body>
 </html>
