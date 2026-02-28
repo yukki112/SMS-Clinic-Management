@@ -9,7 +9,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'superadmin') {
 }
 
 // Include FPDF library
-require_once '../vendor/fpdf/fpdf.php';
+require_once '../vendor/setasign/fpdf/fpdf.php';
 
 $database = new Database();
 $db = $database->getConnection();
