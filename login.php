@@ -180,6 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .logo-img {
             width: 56px;
             height: 56px;
+            border-radius: 30%;
             object-fit: contain;
             filter: drop-shadow(0 6px 12px rgba(25,25,112,0.2));
         }
@@ -439,8 +440,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             </div>
 
             <div class="auth-header">
-                <h2>staff access</h2>
-                <p><i class="fas fa-shield-alt" style="margin-right: 0.3rem;"></i>secure entry · grades 11–college</p>
+                <h2>Sign In</h2>
+               
             </div>
             
             <?php if ($error): ?>
