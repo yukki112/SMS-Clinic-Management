@@ -31,6 +31,36 @@ $student_id_search = isset($_GET['student_id']) ? $_GET['student_id'] : '';
 $success_message = '';
 $error_message = '';
 $generated_pdf = '';
+$show_verification_modal = false;
+
+// Check if verification was completed
+if (isset($_SESSION['verified_student_id_clearance']) && $_SESSION['verified_student_id_clearance'] === $student_id_search) {
+    $show_verification_modal = false;
+} elseif (!empty($student_id_search) && !isset($_POST['action'])) {
+    $show_verification_modal = true;
+}
+
+// Handle verification submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['verify_access'])) {
+    $user_id = $_SESSION['user_id'];
+    $password = $_POST['password'];
+    
+    // Verify password
+    $query = "SELECT password FROM users WHERE id = :user_id";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':user_id', $user_id);
+    $stmt->execute();
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($user && password_verify($password, $user['password'])) {
+        $_SESSION['verified_student_id_clearance'] = $_POST['student_id'];
+        header("Location: " . strtok($_SERVER["REQUEST_URI"], '?') . "?student_id=" . urlencode($_POST['student_id']));
+        exit();
+    } else {
+        $verification_error = "Invalid password. Access denied.";
+        $show_verification_modal = true;
+    }
+}
 
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
@@ -79,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 $generated_pdf = 'generate_clearance.php?id=' . $clearance_id;
                 
                 // Show success with PDF link
-                $success_message .= ' <a href="' . $generated_pdf . '" target="_blank" style="color: white; background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 5px; text-decoration: none; margin-left: 10px;">📄 Download Clearance Form</a>';
+                $success_message .= ' <a href="' . $generated_pdf . '" target="_blank" style="color: white; background: #24248f; padding: 5px 10px; border-radius: 5px; text-decoration: none; margin-left: 10px;">📄 Download Clearance Form</a>';
             } else {
                 $error_message = "Error creating clearance request.";
             }
@@ -162,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 // Automatically generate PDF if requested
                 if (isset($_POST['generate_pdf']) && $_POST['generate_pdf'] == 'yes') {
                     $generated_pdf = 'generate_certificate.php?id=' . $certificate_id;
-                    $success_message .= ' <a href="' . $generated_pdf . '" target="_blank" style="color: white; background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 5px; text-decoration: none; margin-left: 10px;">📄 Download Certificate</a>';
+                    $success_message .= ' <a href="' . $generated_pdf . '" target="_blank" style="color: white; background: #24248f; padding: 5px 10px; border-radius: 5px; text-decoration: none; margin-left: 10px;">📄 Download Certificate</a>';
                 }
             } else {
                 $error_message = "Error issuing medical certificate.";
@@ -223,7 +253,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 // Automatically generate PDF if requested
                 if (isset($_POST['generate_pdf']) && $_POST['generate_pdf'] == 'yes') {
                     $generated_pdf = 'generate_fit_to_return.php?id=' . $slip_id;
-                    $success_message .= ' <a href="' . $generated_pdf . '" target="_blank" style="color: white; background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 5px; text-decoration: none; margin-left: 10px;">📄 Download Slip</a>';
+                    $success_message .= ' <a href="' . $generated_pdf . '" target="_blank" style="color: white; background: #24248f; padding: 5px 10px; border-radius: 5px; text-decoration: none; margin-left: 10px;">📄 Download Slip</a>';
                 }
             } else {
                 $error_message = "Error creating fit-to-return slip.";
@@ -346,8 +376,8 @@ $approved_clearances = getClearanceRequests($db, 'Approved');
 $all_certificates = getMedicalCertificates($db);
 $all_fit_to_return = getFitToReturnSlips($db);
 
-// Search for student if ID provided
-if (!empty($student_id_search)) {
+// Search for student if ID provided and verified
+if (!empty($student_id_search) && isset($_SESSION['verified_student_id_clearance']) && $_SESSION['verified_student_id_clearance'] === $student_id_search && !isset($_POST['action'])) {
     $api_url = "https://ttm.qcprotektado.com/api/students.php";
     
     $ch = curl_init();
@@ -380,13 +410,23 @@ if (!empty($student_id_search)) {
             
             if (!$found) {
                 $search_error = "Student ID not found in the system.";
+                unset($_SESSION['verified_student_id_clearance']);
             }
         } else {
             $search_error = "Unable to fetch student data.";
+            unset($_SESSION['verified_student_id_clearance']);
         }
     } else {
         $search_error = "Error connecting to student database.";
+        unset($_SESSION['verified_student_id_clearance']);
     }
+} elseif (!empty($student_id_search) && (!isset($_SESSION['verified_student_id_clearance']) || $_SESSION['verified_student_id_clearance'] !== $student_id_search)) {
+    $show_verification_modal = true;
+}
+
+// Clear verification if no student ID
+if (empty($student_id_search) && isset($_SESSION['verified_student_id_clearance'])) {
+    unset($_SESSION['verified_student_id_clearance']);
 }
 ?>
 <!DOCTYPE html>
@@ -407,7 +447,7 @@ if (!empty($student_id_search)) {
 
         body {
             font-family: 'Inter', sans-serif;
-            background: #f8f0f5;
+            background: #eceff1;
             min-height: 100vh;
             position: relative;
             overflow-x: hidden;
@@ -425,7 +465,7 @@ if (!empty($student_id_search)) {
             padding: 20px 30px 30px 30px;
             transition: margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
-            background: #f8f0f5;
+            background: #eceff1;
         }
 
         .main-content.expanded {
@@ -445,17 +485,174 @@ if (!empty($student_id_search)) {
         .welcome-section h1 {
             font-size: 2.2rem;
             font-weight: 700;
-            background: linear-gradient(135deg, #6b2b5e 0%, #a14a76 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: #191970;
             margin-bottom: 8px;
             letter-spacing: -0.5px;
         }
 
         .welcome-section p {
-            color: #7a4b6b;
+            color: #546e7a;
             font-size: 1rem;
             font-weight: 400;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-container {
+            background: white;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 450px;
+            padding: 30px;
+            box-shadow: 0 8px 16px rgba(25, 25, 112, 0.2);
+            animation: slideUp 0.3s ease;
+        }
+
+        .modal-icon {
+            width: 70px;
+            height: 70px;
+            background: #191970;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            color: white;
+        }
+
+        .modal-icon svg {
+            width: 35px;
+            height: 35px;
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #191970;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .modal-subtitle {
+            color: #546e7a;
+            text-align: center;
+            margin-bottom: 25px;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .modal-form {
+            margin-top: 20px;
+        }
+
+        .modal-form .form-group {
+            margin-bottom: 20px;
+        }
+
+        .modal-form label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #546e7a;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .modal-form .form-control {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 1rem;
+            border: 2px solid #cfd8dc;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .modal-form .form-control:focus {
+            outline: none;
+            border-color: #191970;
+            box-shadow: 0 0 0 3px rgba(25, 25, 112, 0.1);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 25px;
+        }
+
+        .modal-btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .modal-btn.primary {
+            background: #191970;
+            color: white;
+        }
+
+        .modal-btn.primary:hover {
+            background: #24248f;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.2);
+        }
+
+        .modal-btn.secondary {
+            background: #eceff1;
+            color: #37474f;
+            border: 1px solid #cfd8dc;
+        }
+
+        .modal-btn.secondary:hover {
+            background: #cfd8dc;
+        }
+
+        .modal-error {
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            border-radius: 12px;
+            padding: 12px 16px;
+            color: #c62828;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* Stats Grid */
@@ -469,27 +666,27 @@ if (!empty($student_id_search)) {
 
         .stat-card {
             background: white;
-            border-radius: 20px;
+            border-radius: 16px;
             padding: 20px;
             display: flex;
             align-items: center;
             gap: 15px;
             transition: all 0.3s ease;
-            box-shadow: 0 4px 6px -1px rgba(107, 43, 94, 0.1), 0 2px 4px -1px rgba(107, 43, 94, 0.06);
-            border: 1px solid #e9d0df;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
         }
 
         .stat-card:hover {
             transform: translateY(-4px);
-            box-shadow: 0 20px 25px -5px rgba(107, 43, 94, 0.2), 0 10px 10px -5px rgba(107, 43, 94, 0.1);
-            border-color: #a14a76;
+            box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
+            border-color: #191970;
         }
 
         .stat-icon {
             width: 50px;
             height: 50px;
-            background: linear-gradient(135deg, #6b2b5e 0%, #a14a76 100%);
-            border-radius: 14px;
+            background: #191970;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -504,12 +701,12 @@ if (!empty($student_id_search)) {
         .stat-info h3 {
             font-size: 1.6rem;
             font-weight: 700;
-            color: #6b2b5e;
+            color: #191970;
             margin-bottom: 2px;
         }
 
         .stat-info p {
-            color: #7a4b6b;
+            color: #546e7a;
             font-size: 0.7rem;
             font-weight: 500;
             text-transform: uppercase;
@@ -517,8 +714,8 @@ if (!empty($student_id_search)) {
         }
 
         .warning-badge {
-            background: #fde7e9;
-            color: #c44545;
+            background: #ffebee;
+            color: #c62828;
             padding: 4px 8px;
             border-radius: 30px;
             font-size: 0.7rem;
@@ -539,14 +736,14 @@ if (!empty($student_id_search)) {
         }
 
         .alert-success {
-            background: #e0f2e9;
-            border: 1px solid #b8e0d2;
-            color: #1e7b5c;
+            background: #e8f5e9;
+            border: 1px solid #a5d6a7;
+            color: #2e7d32;
         }
 
         .alert-success a {
             color: white;
-            background: #1e7b5c;
+            background: #24248f;
             padding: 5px 10px;
             border-radius: 5px;
             text-decoration: none;
@@ -556,13 +753,13 @@ if (!empty($student_id_search)) {
         }
 
         .alert-success a:hover {
-            background: #155d45;
+            background: #191970;
         }
 
         .alert-error {
-            background: #fde7e9;
-            border: 1px solid #fbc1c6;
-            color: #c44545;
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            color: #c62828;
         }
 
         @keyframes slideIn {
@@ -588,16 +785,16 @@ if (!empty($student_id_search)) {
         /* Search Card */
         .search-card {
             background: white;
-            border-radius: 20px;
+            border-radius: 16px;
             padding: 24px;
-            box-shadow: 0 4px 6px -1px rgba(107, 43, 94, 0.1), 0 2px 4px -1px rgba(107, 43, 94, 0.06);
-            border: 1px solid #e9d0df;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
         }
 
         .card-title {
             font-size: 1.1rem;
             font-weight: 600;
-            color: #6b2b5e;
+            color: #191970;
             margin-bottom: 20px;
             display: flex;
             align-items: center;
@@ -607,7 +804,7 @@ if (!empty($student_id_search)) {
         .card-title svg {
             width: 24px;
             height: 24px;
-            color: #a14a76;
+            color: #191970;
         }
 
         .status-badge {
@@ -619,8 +816,8 @@ if (!empty($student_id_search)) {
         }
 
         .status-approved {
-            background: #d4edda;
-            color: #1e7b5c;
+            background: #e8f5e9;
+            color: #2e7d32;
         }
 
         .status-pending {
@@ -629,13 +826,13 @@ if (!empty($student_id_search)) {
         }
 
         .status-not-cleared {
-            background: #fde7e9;
-            color: #c44545;
+            background: #ffebee;
+            color: #c62828;
         }
 
         .status-expired {
-            background: #e9ecef;
-            color: #6c757d;
+            background: #eceff1;
+            color: #78909c;
         }
 
         .search-form {
@@ -650,7 +847,7 @@ if (!empty($student_id_search)) {
             display: block;
             font-size: 0.8rem;
             font-weight: 600;
-            color: #7a4b6b;
+            color: #546e7a;
             margin-bottom: 6px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -660,22 +857,22 @@ if (!empty($student_id_search)) {
             width: 100%;
             padding: 12px 16px;
             font-size: 0.95rem;
-            border: 2px solid #e9d0df;
-            border-radius: 12px;
+            border: 2px solid #cfd8dc;
+            border-radius: 10px;
             transition: all 0.3s ease;
             background: white;
-            color: #4a2e40;
+            color: #37474f;
         }
 
         .form-control:focus {
             outline: none;
-            border-color: #a14a76;
-            box-shadow: 0 0 0 3px rgba(161, 74, 118, 0.1);
+            border-color: #191970;
+            box-shadow: 0 0 0 3px rgba(25, 25, 112, 0.1);
         }
 
         select.form-control {
             appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237a4b6b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23546e7a' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
             background-repeat: no-repeat;
             background-position: right 12px center;
             background-size: 16px;
@@ -701,7 +898,7 @@ if (!empty($student_id_search)) {
         .btn {
             padding: 12px 24px;
             border: none;
-            border-radius: 12px;
+            border-radius: 10px;
             font-size: 0.95rem;
             font-weight: 600;
             cursor: pointer;
@@ -709,24 +906,25 @@ if (!empty($student_id_search)) {
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #6b2b5e 0%, #a14a76 100%);
+            background: #191970;
             color: white;
             width: 100%;
         }
 
         .btn-primary:hover {
+            background: #24248f;
             transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(107, 43, 94, 0.3);
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.2);
         }
 
         .btn-secondary {
-            background: #f0e2ea;
-            color: #6b2b5e;
-            border: 1px solid #e9d0df;
+            background: #eceff1;
+            color: #37474f;
+            border: 1px solid #cfd8dc;
         }
 
         .btn-secondary:hover {
-            background: #e9d0df;
+            background: #cfd8dc;
         }
 
         .btn-sm {
@@ -745,10 +943,10 @@ if (!empty($student_id_search)) {
         /* Quick Stats Card */
         .quick-stats-card {
             background: white;
-            border-radius: 20px;
+            border-radius: 16px;
             padding: 24px;
-            box-shadow: 0 4px 6px -1px rgba(107, 43, 94, 0.1), 0 2px 4px -1px rgba(107, 43, 94, 0.06);
-            border: 1px solid #e9d0df;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
         }
 
         .pending-list {
@@ -758,7 +956,7 @@ if (!empty($student_id_search)) {
 
         .pending-item {
             padding: 12px 0;
-            border-bottom: 1px solid #f0e2ea;
+            border-bottom: 1px solid #eceff1;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -774,13 +972,13 @@ if (!empty($student_id_search)) {
 
         .pending-name {
             font-weight: 600;
-            color: #6b2b5e;
+            color: #191970;
             font-size: 0.9rem;
         }
 
         .pending-meta {
             font-size: 0.7rem;
-            color: #a14a76;
+            color: #546e7a;
             display: flex;
             gap: 10px;
             margin-top: 4px;
@@ -798,9 +996,9 @@ if (!empty($student_id_search)) {
         /* Tabs */
         .tabs-section {
             background: white;
-            border-radius: 24px;
-            box-shadow: 0 10px 15px -3px rgba(107, 43, 94, 0.1), 0 4px 6px -2px rgba(107, 43, 94, 0.05);
-            border: 1px solid #e9d0df;
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
             overflow: hidden;
             margin-bottom: 30px;
             animation: fadeInUp 0.8s ease;
@@ -808,8 +1006,8 @@ if (!empty($student_id_search)) {
 
         .tabs-header {
             display: flex;
-            border-bottom: 2px solid #f0e2ea;
-            background: #fdf8fa;
+            border-bottom: 2px solid #eceff1;
+            background: #f5f5f5;
             overflow-x: auto;
             padding: 0 20px;
         }
@@ -820,7 +1018,7 @@ if (!empty($student_id_search)) {
             border: none;
             font-size: 0.95rem;
             font-weight: 600;
-            color: #7a4b6b;
+            color: #78909c;
             cursor: pointer;
             transition: all 0.3s ease;
             position: relative;
@@ -828,11 +1026,12 @@ if (!empty($student_id_search)) {
         }
 
         .tab-btn:hover {
-            color: #a14a76;
+            color: #191970;
+            background: rgba(25, 25, 112, 0.05);
         }
 
         .tab-btn.active {
-            color: #a14a76;
+            color: #191970;
         }
 
         .tab-btn.active::after {
@@ -842,7 +1041,7 @@ if (!empty($student_id_search)) {
             left: 0;
             right: 0;
             height: 2px;
-            background: #a14a76;
+            background: #191970;
         }
 
         .tab-content {
@@ -859,17 +1058,17 @@ if (!empty($student_id_search)) {
 
         /* Form Cards */
         .form-card {
-            background: #fdf8fa;
-            border-radius: 16px;
+            background: #f8fafc;
+            border-radius: 12px;
             padding: 24px;
             margin-bottom: 30px;
-            border: 1px solid #e9d0df;
+            border: 1px solid #cfd8dc;
         }
 
         .form-card-title {
             font-size: 1rem;
             font-weight: 600;
-            color: #6b2b5e;
+            color: #191970;
             margin-bottom: 20px;
             display: flex;
             align-items: center;
@@ -879,26 +1078,26 @@ if (!empty($student_id_search)) {
         .form-card-title svg {
             width: 20px;
             height: 20px;
-            color: #a14a76;
+            color: #191970;
         }
 
         /* Student Info Bar */
         .student-info-bar {
-            background: #f0e2ea;
+            background: #eceff1;
             border-radius: 16px;
             padding: 20px;
             margin-bottom: 24px;
             display: flex;
             align-items: center;
             gap: 20px;
-            border: 1px solid #e9d0df;
+            border: 1px solid #cfd8dc;
         }
 
         .student-avatar-sm {
             width: 70px;
             height: 70px;
-            background: linear-gradient(135deg, #6b2b5e 0%, #a14a76 100%);
-            border-radius: 16px;
+            background: #191970;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -910,20 +1109,20 @@ if (!empty($student_id_search)) {
         .student-details h3 {
             font-size: 1.3rem;
             font-weight: 600;
-            color: #6b2b5e;
+            color: #191970;
             margin-bottom: 6px;
         }
 
         .student-details p {
-            color: #7a4b6b;
+            color: #546e7a;
             font-size: 0.95rem;
         }
 
         /* Tables */
         .table-wrapper {
             overflow-x: auto;
-            border-radius: 16px;
-            border: 1px solid #e9d0df;
+            border-radius: 12px;
+            border: 1px solid #cfd8dc;
             margin-top: 20px;
         }
 
@@ -937,27 +1136,27 @@ if (!empty($student_id_search)) {
             padding: 16px 12px;
             font-size: 0.8rem;
             font-weight: 600;
-            color: #7a4b6b;
+            color: #78909c;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            border-bottom: 2px solid #e9d0df;
-            background: #f0e2ea;
+            border-bottom: 2px solid #cfd8dc;
+            background: #eceff1;
         }
 
         .data-table td {
             padding: 16px 12px;
             font-size: 0.9rem;
-            color: #4a2e40;
-            border-bottom: 1px solid #f0e2ea;
+            color: #37474f;
+            border-bottom: 1px solid #eceff1;
         }
 
         .data-table tr:hover td {
-            background: #fdf8fa;
+            background: #f5f5f5;
         }
 
         .clearance-code {
             font-weight: 600;
-            color: #a14a76;
+            color: #191970;
         }
 
         .action-buttons {
@@ -970,8 +1169,8 @@ if (!empty($student_id_search)) {
             display: inline-flex;
             align-items: center;
             gap: 4px;
-            background: #f0e2ea;
-            color: #6b2b5e;
+            background: #eceff1;
+            color: #191970;
             padding: 4px 8px;
             border-radius: 6px;
             text-decoration: none;
@@ -980,14 +1179,14 @@ if (!empty($student_id_search)) {
         }
 
         .pdf-link:hover {
-            background: #a14a76;
+            background: #191970;
             color: white;
         }
 
         .empty-state {
             text-align: center;
             padding: 50px 20px;
-            color: #7a4b6b;
+            color: #78909c;
         }
 
         .empty-state svg {
@@ -995,27 +1194,27 @@ if (!empty($student_id_search)) {
             height: 60px;
             margin-bottom: 20px;
             opacity: 0.5;
-            color: #a14a76;
+            color: #90a4ae;
         }
 
         .empty-state p {
             font-size: 1rem;
             margin-bottom: 5px;
-            color: #6b2b5e;
+            color: #37474f;
         }
 
         .empty-state small {
             font-size: 0.85rem;
-            color: #7a4b6b;
+            color: #78909c;
         }
 
         /* PDF Options */
         .pdf-option {
             margin-top: 15px;
             padding: 15px;
-            background: #f0e2ea;
+            background: #eceff1;
             border-radius: 12px;
-            border: 1px solid #e9d0df;
+            border: 1px solid #cfd8dc;
         }
 
         .checkbox-group {
@@ -1027,7 +1226,19 @@ if (!empty($student_id_search)) {
         .checkbox-group input[type="checkbox"] {
             width: 18px;
             height: 18px;
-            accent-color: #a14a76;
+            accent-color: #191970;
+        }
+
+        .info-box {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 15px 0;
+            color: #1565c0;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         @keyframes fadeInUp {
@@ -1181,7 +1392,7 @@ if (!empty($student_id_search)) {
                         </form>
 
                         <?php if ($search_error): ?>
-                            <div style="margin-top: 15px; padding: 12px; background: #fde7e9; border-radius: 12px; color: #c44545; font-size: 0.9rem;">
+                            <div style="margin-top: 15px; padding: 12px; background: #ffebee; border-radius: 12px; color: #c62828; font-size: 0.9rem;">
                                 <?php echo $search_error; ?>
                             </div>
                         <?php endif; ?>
@@ -1189,7 +1400,7 @@ if (!empty($student_id_search)) {
                         <!-- Recent Clearances List -->
                         <?php if (!empty($approved_clearances)): ?>
                             <div style="margin-top: 24px;">
-                                <div style="font-size: 0.9rem; font-weight: 600; color: #6b2b5e; margin-bottom: 12px;">
+                                <div style="font-size: 0.9rem; font-weight: 600; color: #191970; margin-bottom: 12px;">
                                     ✅ Recent Clearances
                                 </div>
                                 <div class="pending-list">
@@ -1221,18 +1432,18 @@ if (!empty($student_id_search)) {
                         </div>
                         
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
-                            <div style="background: #f0e2ea; padding: 16px; border-radius: 16px; text-align: center;">
-                                <div style="font-size: 1.8rem; font-weight: 700; color: #6b2b5e;"><?php echo count($approved_clearances); ?></div>
-                                <div style="font-size: 0.8rem; color: #7a4b6b;">Total Approved</div>
+                            <div style="background: #eceff1; padding: 16px; border-radius: 12px; text-align: center;">
+                                <div style="font-size: 1.8rem; font-weight: 700; color: #191970;"><?php echo count($approved_clearances); ?></div>
+                                <div style="font-size: 0.8rem; color: #546e7a;">Total Approved</div>
                             </div>
-                            <div style="background: #f0e2ea; padding: 16px; border-radius: 16px; text-align: center;">
-                                <div style="font-size: 1.8rem; font-weight: 700; color: #6b2b5e;"><?php echo count($all_certificates); ?></div>
-                                <div style="font-size: 0.8rem; color: #7a4b6b;">Certificates</div>
+                            <div style="background: #eceff1; padding: 16px; border-radius: 12px; text-align: center;">
+                                <div style="font-size: 1.8rem; font-weight: 700; color: #191970;"><?php echo count($all_certificates); ?></div>
+                                <div style="font-size: 0.8rem; color: #546e7a;">Certificates</div>
                             </div>
                         </div>
 
                         <div style="margin-top: 20px;">
-                            <div style="font-size: 0.9rem; font-weight: 600; color: #6b2b5e; margin-bottom: 12px;">
+                            <div style="font-size: 0.9rem; font-weight: 600; color: #191970; margin-bottom: 12px;">
                                 Quick Actions
                             </div>
                             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
@@ -1323,7 +1534,7 @@ if (!empty($student_id_search)) {
                                         <div class="form-group">
                                             <label>Valid Until (Optional)</label>
                                             <input type="date" name="valid_until" class="form-control">
-                                            <small style="color: #7a4b6b; font-size: 0.7rem;">Leave empty if no expiry</small>
+                                            <small style="color: #546e7a; font-size: 0.7rem;">Leave empty if no expiry</small>
                                         </div>
                                     </div>
                                     
@@ -1334,7 +1545,7 @@ if (!empty($student_id_search)) {
                                         </div>
                                     </div>
                                     
-                                    <div style="background: #d4edda; padding: 10px; border-radius: 8px; margin: 15px 0; color: #1e7b5c; font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
+                                    <div class="info-box">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
                                             <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999"/>
                                             <path d="M22 4L12 14.01L9 11.01"/>
@@ -1519,7 +1730,7 @@ if (!empty($student_id_search)) {
                             </div>
                             
                             <!-- Clearance Requests -->
-                            <h3 style="color: #6b2b5e; margin: 20px 0 10px; font-size: 1rem;">Issued Clearances</h3>
+                            <h3 style="color: #191970; margin: 20px 0 10px; font-size: 1rem;">Issued Clearances</h3>
                             <div class="table-wrapper">
                                 <table class="data-table">
                                     <thead>
@@ -1585,7 +1796,7 @@ if (!empty($student_id_search)) {
                             </div>
                             
                             <!-- Medical Certificates -->
-                            <h3 style="color: #6b2b5e; margin: 30px 0 10px; font-size: 1rem;">Medical Certificates</h3>
+                            <h3 style="color: #191970; margin: 30px 0 10px; font-size: 1rem;">Medical Certificates</h3>
                             <div class="table-wrapper">
                                 <table class="data-table">
                                     <thead>
@@ -1639,7 +1850,7 @@ if (!empty($student_id_search)) {
                             </div>
                             
                             <!-- Fit-to-Return Slips -->
-                            <h3 style="color: #6b2b5e; margin: 30px 0 10px; font-size: 1rem;">Fit-to-Return Slips</h3>
+                            <h3 style="color: #191970; margin: 30px 0 10px; font-size: 1rem;">Fit-to-Return Slips</h3>
                             <div class="table-wrapper">
                                 <table class="data-table">
                                     <thead>
@@ -1788,6 +1999,68 @@ if (!empty($student_id_search)) {
             </div>
         </div>
     </div>
+
+    <!-- Security Verification Modal -->
+    <?php if ($show_verification_modal && !empty($student_id_search)): ?>
+    <div class="modal-overlay" id="verificationModal">
+        <div class="modal-container">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+            </div>
+            <h2 class="modal-title">Secure Access Required</h2>
+            <p class="modal-subtitle">
+                You are accessing confidential clearance records for<br>
+                <strong>Student ID: <?php echo htmlspecialchars($student_id_search); ?></strong>
+            </p>
+            
+            <?php if (isset($verification_error)): ?>
+                <div class="modal-error">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <?php echo $verification_error; ?>
+                </div>
+            <?php endif; ?>
+            
+            <form method="POST" action="" class="modal-form">
+                <input type="hidden" name="student_id" value="<?php echo htmlspecialchars($student_id_search); ?>">
+                <div class="form-group">
+                    <label for="password">Enter Your Password to Continue</label>
+                    <input type="password" class="form-control" id="password" name="password" 
+                           placeholder="••••••••" required autofocus>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn secondary" onclick="cancelAccess()">Cancel</button>
+                    <button type="submit" name="verify_access" class="modal-btn primary">Verify & Access</button>
+                </div>
+            </form>
+            <p style="text-align: center; margin-top: 20px; font-size: 0.8rem; color: #546e7a;">
+                This helps us maintain confidentiality of student clearance records
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        // Prevent background scrolling when modal is open
+        document.body.style.overflow = 'hidden';
+        
+        function cancelAccess() {
+            window.location.href = window.location.pathname; // Redirect to same page without query string
+        }
+        
+        // Close modal when clicking outside
+        document.getElementById('verificationModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                cancelAccess();
+            }
+        });
+    </script>
+    <?php endif; ?>
 
     <script>
         // Sidebar toggle
