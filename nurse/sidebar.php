@@ -19,11 +19,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                     <span class="logo-sub">Clinic Management</span>
                 </div>
             </div>
-            <button class="collapse-btn" id="collapseSidebar">
-                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
-                    <path d="M15 18L9 12L15 6" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </button>
+           
         </div>
 
         <div class="nav-container">
