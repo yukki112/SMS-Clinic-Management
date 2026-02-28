@@ -1,48 +1,9 @@
 <?php
-// Start session if not already started
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
 // Get current page for active state
 $current_page = basename($_SERVER['PHP_SELF']);
-
-// Session timeout settings
-$timeout_duration = 120; // 2 minutes in seconds
-
-// Check if last activity is set
-if (isset($_SESSION['last_activity'])) {
-    $elapsed_time = time() - $_SESSION['last_activity'];
-    
-    if ($elapsed_time > $timeout_duration) {
-        // Session expired
-        session_unset();
-        session_destroy();
-        header("Location: ../logout.php?timeout=1");
-        exit();
-    }
-}
-
-// Update last activity time
-$_SESSION['last_activity'] = time();
-
-// Set session timeout warning at 1.5 minutes (90 seconds)
-$warning_time = 90; // Show warning 30 seconds before timeout
-$time_left = isset($_SESSION['last_activity']) ? 
-    ($timeout_duration - (time() - $_SESSION['last_activity'])) : 
-    $timeout_duration;
 ?>
 <aside class="sidebar">
     <div class="sidebar-content">
-        <!-- Session Timeout Timer Display -->
-        <div class="session-timer" id="sessionTimer">
-            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
-                <circle cx="12" cy="12" r="10"/>
-                <polyline points="12 6 12 12 16 14"/>
-            </svg>
-            <span>Session expires in: <span id="timerDisplay">2:00</span></span>
-        </div>
-
         <div class="logo-area">
             <div class="logo-wrapper">
                 <div class="logo-image">
@@ -246,97 +207,430 @@ $time_left = isset($_SESSION['last_activity']) ?
         </div>
     </div>
 
-    <!-- Session Timeout Warning Modal -->
-    <div id="timeoutModal" class="timeout-modal">
-        <div class="timeout-modal-content">
-            <div class="timeout-modal-header">
-                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#f39c12" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="12" y1="8" x2="12" y2="12"/>
-                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+    <!-- Session Timeout Modal -->
+    <div class="session-modal-overlay" id="sessionModalOverlay">
+        <div class="session-modal">
+            <div class="session-modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M12 6V12L16 14" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <h3>Session Timeout Warning</h3>
             </div>
-            <div class="timeout-modal-body">
-                <p>Your session will expire in <span id="timeoutCountdown">30</span> seconds due to inactivity.</p>
-                <p>Click "Stay Logged In" to continue your session.</p>
-            </div>
-            <div class="timeout-modal-footer">
-                <button class="btn-logout" onclick="forceLogout()">Logout Now</button>
-                <button class="btn-stay" onclick="resetSession()">Stay Logged In</button>
+            <h3 class="session-modal-title">Session Timeout Warning</h3>
+            <p class="session-modal-message">Your session will expire in</p>
+            <div class="session-timer" id="sessionTimer">02:00</div>
+            <p class="session-modal-message">due to inactivity.</p>
+            <div class="session-modal-actions">
+                <button class="session-btn session-btn-primary" id="continueSession">Continue Session</button>
+                <button class="session-btn session-btn-danger" id="logoutNow">Logout Now</button>
             </div>
         </div>
     </div>
 </aside>
 
 <style>
-/* Existing styles remain the same, add these new styles at the end */
+.sidebar {
+    position: fixed;
+    left: 20px;
+    top: 20px;
+    bottom: 20px;
+    width: 300px;
+    background: white;
+    border-radius: 28px;
+    border: 1px solid rgba(25, 25, 112, 0.1);
+    box-shadow: 0 4px 12px rgba(25, 25, 112, 0.08);
+    overflow: hidden;
+    z-index: 1000;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
 
-.session-timer {
-    background: linear-gradient(135deg, #191970 0%, #2a2a8a 100%);
-    color: white;
-    padding: 12px 16px;
-    border-radius: 16px;
-    margin-bottom: 20px;
-    font-size: 0.85rem;
+.sidebar.collapsed {
+    width: 90px;
+}
+
+.sidebar.collapsed .logo-text,
+.sidebar.collapsed .nav-label,
+.sidebar.collapsed .nav-section-title span,
+.sidebar.collapsed .nav-badge,
+.sidebar.collapsed .nav-count,
+.sidebar.collapsed .upgrade-content {
+    display: none;
+}
+
+.sidebar.collapsed .nav-icon-wrapper {
+    margin: 0 auto;
+}
+
+.sidebar.collapsed .logo-wrapper {
+    justify-content: center;
+}
+
+.sidebar.collapsed .collapse-btn svg {
+    transform: rotate(180deg);
+}
+
+.sidebar.collapsed .user-details {
+    display: none;
+}
+
+.sidebar.collapsed .user-info {
+    justify-content: center;
+    margin-bottom: 0;
+}
+
+.sidebar.collapsed .user-avatar {
+    margin-bottom: 8px;
+}
+
+.sidebar.collapsed .logout-btn span {
+    display: none;
+}
+
+.sidebar.collapsed .logout-btn {
+    padding: 10px 0;
+}
+
+.sidebar-content {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 24px 16px;
+    color: #191970;
+}
+
+.logo-area {
     display: flex;
     align-items: center;
-    gap: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    animation: glow 2s ease-in-out infinite;
+    justify-content: space-between;
+    margin-bottom: 32px;
+    padding: 0 8px;
 }
 
-@keyframes glow {
-    0%, 100% { box-shadow: 0 2px 10px rgba(25, 25, 112, 0.3); }
-    50% { box-shadow: 0 4px 20px rgba(25, 25, 112, 0.5); }
+.logo-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
-.session-timer svg {
+.logo-image {
+    width: 42px;
+    height: 42px;
+    background: #191970;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.logo-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.logo-text {
+    display: flex;
+    flex-direction: column;
+}
+
+.logo-main {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: #191970;
+    line-height: 1.2;
+}
+
+.logo-sub {
+    font-size: 0.7rem;
+    color: #546e7a;
+    letter-spacing: 0.5px;
+}
+
+.collapse-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    border: 1px solid rgba(25, 25, 112, 0.1);
+    background: #eceff1;
+    color: #191970;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.collapse-btn:hover {
+    background: #191970;
+    color: white;
+    transform: scale(1.05);
+}
+
+.nav-container {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #191970 #eceff1;
+    padding: 0 4px;
+}
+
+.nav-container::-webkit-scrollbar {
+    width: 4px;
+}
+
+.nav-container::-webkit-scrollbar-track {
+    background: #eceff1;
+}
+
+.nav-container::-webkit-scrollbar-thumb {
+    background: #191970;
+    border-radius: 20px;
+}
+
+.nav-section {
+    margin-bottom: 28px;
+}
+
+.nav-section-title {
+    padding: 0 16px;
+    margin-bottom: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #546e7a;
+}
+
+.nav-menu {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.nav-item {
+    margin-bottom: 4px;
+}
+
+.nav-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-radius: 14px;
+    color: #546e7a;
+    text-decoration: none;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.nav-item.active .nav-link {
+    background: #191970;
+    color: white;
+}
+
+.nav-link:hover {
+    background: #eceff1;
+    color: #191970;
+}
+
+.nav-icon-wrapper {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: #eceff1;
+    transition: all 0.3s ease;
+}
+
+.nav-item.active .nav-icon-wrapper {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+}
+
+.nav-link:hover .nav-icon-wrapper {
+    background: white;
+    color: #191970;
+}
+
+.nav-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.nav-label {
+    flex: 1;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.nav-badge {
+    padding: 4px 8px;
+    background: #ffebee;
+    border-radius: 20px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #c62828;
+    border: 1px solid #ffcdd2;
+}
+
+.nav-badge.urgent {
+    background: #ffebee;
+    color: #c62828;
+    border-color: #ffcdd2;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.nav-count {
+    padding: 2px 6px;
+    background: #eceff1;
+    border-radius: 8px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #191970;
+}
+
+.sidebar-footer {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #eceff1;
+}
+
+.user-profile-card {
+    background: #eceff1;
+    border-radius: 20px;
+    padding: 16px;
+    border: 1px solid rgba(25, 25, 112, 0.1);
+    transition: all 0.3s ease;
+}
+
+.sidebar.collapsed .user-profile-card {
+    padding: 12px 8px;
+}
+
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.user-avatar {
+    width: 48px;
+    height: 48px;
+    background: #191970;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
     flex-shrink: 0;
 }
 
-.session-timer span {
+.avatar-text {
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.user-details {
     flex: 1;
+    overflow: hidden;
 }
 
-#timerDisplay {
-    font-weight: 700;
-    font-family: monospace;
-    font-size: 1rem;
-    background: rgba(255, 255, 255, 0.2);
+.user-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #191970;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-role {
+    font-size: 0.7rem;
+    color: #546e7a;
+    display: inline-block;
     padding: 2px 8px;
+    background: white;
     border-radius: 20px;
-    margin-left: 4px;
+    border: 1px solid rgba(25, 25, 112, 0.1);
 }
 
-.sidebar.collapsed .session-timer {
-    padding: 8px;
+.logout-btn {
+    display: flex;
+    align-items: center;
     justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px;
+    background: white;
+    border-radius: 14px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #c62828;
+    text-decoration: none;
+    transition: all 0.3s ease;
+    border: 1px solid rgba(198, 40, 40, 0.2);
 }
 
-.sidebar.collapsed .session-timer span:not(#timerDisplay) {
-    display: none;
+.logout-btn svg {
+    width: 18px;
+    height: 18px;
+    transition: all 0.3s ease;
 }
 
-.sidebar.collapsed #timerDisplay {
-    font-size: 0.8rem;
-    padding: 2px 4px;
+.logout-btn:hover {
+    background: #c62828;
+    color: white;
+    border-color: #c62828;
 }
 
-/* Timeout Modal Styles */
-.timeout-modal {
-    display: none;
+.logout-btn:hover svg {
+    transform: translateX(3px);
+}
+
+/* Session Modal Styles */
+.session-modal-overlay {
     position: fixed;
     top: 0;
     left: 0;
-    width: 100%;
-    height: 100%;
+    right: 0;
+    bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(5px);
-    z-index: 9999;
+    display: none;
     align-items: center;
     justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(5px);
     animation: fadeIn 0.3s ease;
+}
+
+.session-modal-overlay.active {
+    display: flex;
+}
+
+.session-modal {
+    background: white;
+    border-radius: 28px;
+    padding: 32px;
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(25, 25, 112, 0.3);
+    animation: slideUp 0.3s ease;
+    border: 1px solid rgba(25, 25, 112, 0.1);
 }
 
 @keyframes fadeIn {
@@ -344,128 +638,120 @@ $time_left = isset($_SESSION['last_activity']) ?
     to { opacity: 1; }
 }
 
-.timeout-modal.show {
-    display: flex;
-}
-
-.timeout-modal-content {
-    background: white;
-    border-radius: 28px;
-    width: 90%;
-    max-width: 400px;
-    box-shadow: 0 20px 60px rgba(25, 25, 112, 0.3);
-    overflow: hidden;
-    animation: slideUp 0.3s ease;
-}
-
 @keyframes slideUp {
-    from { transform: translateY(50px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
-.timeout-modal-header {
-    background: linear-gradient(135deg, #191970 0%, #2a2a8a 100%);
+.session-modal-icon {
+    width: 80px;
+    height: 80px;
+    background: #191970;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
     color: white;
-    padding: 24px;
-    text-align: center;
+    animation: pulse 2s infinite;
 }
 
-.timeout-modal-header svg {
+.session-modal-icon svg {
+    width: 40px;
+    height: 40px;
+}
+
+.session-modal-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #191970;
     margin-bottom: 12px;
 }
 
-.timeout-modal-header h3 {
-    margin: 0;
-    font-size: 1.3rem;
-    font-weight: 600;
-}
-
-.timeout-modal-body {
-    padding: 24px;
-    text-align: center;
-}
-
-.timeout-modal-body p {
-    margin: 8px 0;
-    color: #333;
+.session-modal-message {
     font-size: 1rem;
-    line-height: 1.5;
+    color: #546e7a;
+    margin-bottom: 8px;
 }
 
-.timeout-modal-body p:first-child {
-    font-weight: 600;
-    color: #191970;
-}
-
-#timeoutCountdown {
-    font-size: 1.4rem;
+.session-timer {
+    font-size: 3rem;
     font-weight: 700;
     color: #c62828;
+    margin: 15px 0;
     font-family: monospace;
-    padding: 0 4px;
+    text-shadow: 0 2px 4px rgba(198, 40, 40, 0.2);
 }
 
-.timeout-modal-footer {
+.session-modal-actions {
     display: flex;
-    padding: 16px 24px 24px;
     gap: 12px;
+    margin-top: 24px;
 }
 
-.timeout-modal-footer button {
+.session-btn {
     flex: 1;
     padding: 12px;
-    border: none;
     border-radius: 14px;
-    font-size: 0.95rem;
+    font-size: 1rem;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.3s ease;
+    border: none;
 }
 
-.btn-logout {
+.session-btn-primary {
+    background: #191970;
+    color: white;
+}
+
+.session-btn-primary:hover {
+    background: #0f0f4b;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(25, 25, 112, 0.3);
+}
+
+.session-btn-danger {
     background: #ffebee;
     color: #c62828;
     border: 1px solid #ffcdd2;
 }
 
-.btn-logout:hover {
+.session-btn-danger:hover {
     background: #c62828;
     color: white;
-    border-color: #c62828;
-}
-
-.btn-stay {
-    background: #191970;
-    color: white;
-    border: 1px solid #191970;
-}
-
-.btn-stay:hover {
-    background: #2a2a8a;
     transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(25, 25, 112, 0.3);
+    box-shadow: 0 4px 12px rgba(198, 40, 40, 0.3);
 }
 
-/* Warning state for timer */
-.session-timer.warning {
-    background: linear-gradient(135deg, #c62828 0%, #e53935 100%);
-    animation: warningPulse 1s ease-in-out infinite;
-}
-
-@keyframes warningPulse {
-    0%, 100% { 
-        box-shadow: 0 2px 10px rgba(198, 40, 40, 0.3);
-        transform: scale(1);
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .sidebar {
+        left: 10px;
+        top: 10px;
+        bottom: 10px;
     }
-    50% { 
-        box-shadow: 0 4px 25px rgba(198, 40, 40, 0.6);
-        transform: scale(1.02);
+    
+    .session-modal {
+        padding: 24px;
+        margin: 16px;
+    }
+    
+    .session-timer {
+        font-size: 2.5rem;
     }
 }
 </style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Sidebar collapse functionality
     const sidebar = document.querySelector('.sidebar');
     const collapseBtn = document.getElementById('collapseSidebar');
     
@@ -475,127 +761,123 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Session timeout functionality
-    let timeoutDuration = 120; // 2 minutes in seconds
-    let warningTime = 30; // Show warning 30 seconds before timeout
-    let timeLeft = <?php echo $time_left; ?>;
-    let timeoutInterval;
+    // Session Timeout Functionality
+    const SESSION_TIMEOUT = 2 * 60; // 2 minutes in seconds
+    const WARNING_TIME = 30; // Show warning 30 seconds before timeout
+    let timeLeft = SESSION_TIMEOUT;
     let warningShown = false;
+    let countdownInterval;
     
-    const timerDisplay = document.getElementById('timerDisplay');
-    const sessionTimer = document.querySelector('.session-timer');
-    const timeoutModal = document.getElementById('timeoutModal');
-    const timeoutCountdown = document.getElementById('timeoutCountdown');
+    const modalOverlay = document.getElementById('sessionModalOverlay');
+    const sessionTimer = document.getElementById('sessionTimer');
+    const continueBtn = document.getElementById('continueSession');
+    const logoutBtn = document.getElementById('logoutNow');
     
+    // Format time as MM:SS
     function formatTime(seconds) {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
+        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
     
-    function updateTimer() {
+    // Update countdown timer
+    function updateCountdown() {
         timeLeft--;
         
         if (timeLeft <= 0) {
             // Time's up - redirect to logout
-            clearInterval(timeoutInterval);
-            window.location.href = '../logout.php?timeout=1';
-            return;
-        }
-        
-        // Update timer display
-        timerDisplay.textContent = formatTime(timeLeft);
-        
-        // Show warning modal when 30 seconds left
-        if (timeLeft <= warningTime && !warningShown) {
+            window.location.href = '../logout.php';
+        } else if (timeLeft <= WARNING_TIME && !warningShown) {
+            // Show warning modal
             showWarningModal();
-            warningShown = true;
-            sessionTimer.classList.add('warning');
         }
-        
-        // Change color when less than 1 minute
-        if (timeLeft <= 60) {
-            sessionTimer.style.background = 'linear-gradient(135deg, #e65100 0%, #f57c00 100%)';
-        }
-        
-        // Reset session activity on user interaction
-        resetSessionOnActivity();
     }
     
-    // Start the timer
-    if (timeLeft > 0) {
-        timerDisplay.textContent = formatTime(timeLeft);
-        timeoutInterval = setInterval(updateTimer, 1000);
-    }
-    
+    // Show warning modal
     function showWarningModal() {
-        timeoutModal.classList.add('show');
+        warningShown = true;
+        modalOverlay.classList.add('active');
         
-        // Countdown in modal
-        let modalTimeLeft = warningTime;
+        // Start countdown in modal
+        let modalTimeLeft = WARNING_TIME;
+        sessionTimer.textContent = formatTime(modalTimeLeft);
+        
+        // Clear existing interval
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+        }
+        
+        // Start modal countdown
         const modalInterval = setInterval(() => {
             modalTimeLeft--;
-            timeoutCountdown.textContent = modalTimeLeft;
+            sessionTimer.textContent = formatTime(modalTimeLeft);
             
             if (modalTimeLeft <= 0) {
                 clearInterval(modalInterval);
-                timeoutModal.classList.remove('show');
-                window.location.href = '../logout.php?timeout=1';
+                window.location.href = '../logout.php';
             }
         }, 1000);
         
-        // Store interval to clear if user stays logged in
-        timeoutModal.dataset.interval = modalInterval;
+        // Store interval to clear on continue
+        window.modalInterval = modalInterval;
     }
     
-    // Function to reset session
-    window.resetSession = function() {
-        // Clear the modal interval
-        if (timeoutModal.dataset.interval) {
-            clearInterval(parseInt(timeoutModal.dataset.interval));
+    // Reset session timer
+    function resetSession() {
+        timeLeft = SESSION_TIMEOUT;
+        warningShown = false;
+        modalOverlay.classList.remove('active');
+        
+        // Clear modal interval
+        if (window.modalInterval) {
+            clearInterval(window.modalInterval);
         }
         
-        // Hide modal
-        timeoutModal.classList.remove('show');
-        
-        // Reset timer
-        timeLeft = timeoutDuration;
-        warningShown = false;
-        sessionTimer.classList.remove('warning');
-        sessionTimer.style.background = 'linear-gradient(135deg, #191970 0%, #2a2a8a 100%)';
-        
-        // Send AJAX request to reset session on server
-        fetch('../reset_session.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        });
-    };
-    
-    // Force logout function
-    window.forceLogout = function() {
-        window.location.href = '../logout.php';
-    };
-    
-    // Reset session on user activity
-    function resetSessionOnActivity() {
-        let activityTimer;
-        
-        const resetTimer = () => {
-            clearTimeout(activityTimer);
-            activityTimer = setTimeout(() => {
-                // Don't reset automatically, let the main timer handle it
-            }, 5000);
-        };
-        
-        // Listen for user activity
-        ['mousedown', 'keydown', 'scroll', 'touchstart'].forEach(eventType => {
-            document.addEventListener(eventType, resetTimer);
-        });
+        // Reset main interval
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+        }
+        countdownInterval = setInterval(updateCountdown, 1000);
     }
+    
+    // Handle continue session
+    continueBtn.addEventListener('click', function() {
+        resetSession();
+    });
+    
+    // Handle logout now
+    logoutBtn.addEventListener('click', function() {
+        window.location.href = '../logout.php';
+    });
+    
+    // Reset timer on user activity
+    function handleUserActivity() {
+        resetSession();
+    }
+    
+    // Track user activity
+    ['mousedown', 'keydown', 'scroll', 'mousemove'].forEach(eventType => {
+        document.addEventListener(eventType, handleUserActivity);
+    });
+    
+    // Start the session timer
+    resetSession();
+    
+    // Handle page visibility change
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) {
+            resetSession();
+        }
+    });
+    
+    // Handle beforeunload to clear intervals
+    window.addEventListener('beforeunload', function() {
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+        }
+        if (window.modalInterval) {
+            clearInterval(window.modalInterval);
+        }
+    });
 });
-
-// Add this to your logout.php to handle timeout parameter
-// In logout.php, you can show a message: "Your session has expired due to inactivity."
 </script>
