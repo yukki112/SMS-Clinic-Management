@@ -98,12 +98,6 @@ function generateOTP() {
 $database = new Database();
 $db = $database->getConnection();
 
-// Check if we're in OTP step
-$showOTPForm = false;
-if (isset($_SESSION['temp_user_id']) && isset($_SESSION['login_step']) && $_SESSION['login_step'] === 'otp') {
-    $showOTPForm = true;
-}
-
 // Handle login form submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     
@@ -153,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $_SESSION['login_step'] = 'otp';
                             $_SESSION['otp_expiry'] = $expires_at;
                             
-                            // Redirect to clear POST data and show OTP form
+                            // Redirect to show OTP form
                             header('Location: login.php?otp_sent=1');
                             exit();
                         } else {
@@ -177,21 +171,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $error = 'Please enter the OTP code';
         } elseif (!isset($_SESSION['temp_user_id'])) {
             $error = 'Session expired. Please login again.';
-            // Clear any partial session
             session_destroy();
-            session_start();
             header('Location: login.php');
             exit();
         } else {
             $user_id = $_SESSION['temp_user_id'];
             $current_time = date('Y-m-d H:i:s');
             
-            // Check OTP validity
+            // IMPORTANT FIX: First check if OTP exists without verified=0 condition
+            // Then check if it's expired
             $query = "SELECT * FROM otp_verification 
                       WHERE user_id = :user_id 
                       AND otp_code = :otp_code 
                       AND expires_at > :current_time 
-                      AND verified = 0 
                       ORDER BY id DESC LIMIT 1";
             $stmt = $db->prepare($query);
             $stmt->bindParam(':user_id', $user_id);
@@ -200,57 +192,81 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $stmt->execute();
             
             if ($otp_record = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                // Check if already verified
+                if ($otp_record['verified'] == 1) {
+                    $error = 'This OTP has already been used. Please login again.';
+                    // Clear temp session
+                    session_destroy();
+                    session_start();
+                    header('Location: login.php');
+                    exit();
+                }
+                
                 // Mark OTP as verified
                 $update_query = "UPDATE otp_verification SET verified = 1 WHERE id = :id";
                 $update_stmt = $db->prepare($update_query);
                 $update_stmt->bindParam(':id', $otp_record['id']);
-                $update_stmt->execute();
                 
-                // Set full session variables
-                $_SESSION['user_id'] = $_SESSION['temp_user_id'];
-                $_SESSION['username'] = $_SESSION['temp_username'];
-                $_SESSION['full_name'] = $_SESSION['temp_full_name'];
-                $_SESSION['email'] = $_SESSION['temp_email'];
-                $_SESSION['role'] = $_SESSION['temp_role'];
-                $_SESSION['login_time'] = time();
-                $_SESSION['otp_verified'] = true;
-                
-                // Clear temporary session data
-                unset($_SESSION['temp_user_id']);
-                unset($_SESSION['temp_username']);
-                unset($_SESSION['temp_full_name']);
-                unset($_SESSION['temp_email']);
-                unset($_SESSION['temp_role']);
-                unset($_SESSION['login_step']);
-                unset($_SESSION['otp_expiry']);
-                
-                // Create session record in database
-                $session_token = bin2hex(random_bytes(32));
-                $ip_address = $_SERVER['REMOTE_ADDR'];
-                $user_agent = $_SERVER['HTTP_USER_AGENT'];
-                $expires_at = date('Y-m-d H:i:s', strtotime('+24 hours'));
-                
-                $session_query = "INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, expires_at) 
-                                  VALUES (:user_id, :session_token, :ip_address, :user_agent, :expires_at)";
-                $session_stmt = $db->prepare($session_query);
-                $session_stmt->bindParam(':user_id', $_SESSION['user_id']);
-                $session_stmt->bindParam(':session_token', $session_token);
-                $session_stmt->bindParam(':ip_address', $ip_address);
-                $session_stmt->bindParam(':user_agent', $user_agent);
-                $session_stmt->bindParam(':expires_at', $expires_at);
-                $session_stmt->execute();
-                
-                $_SESSION['session_token'] = $session_token;
-                
-                // Redirect based on role
-                if ($_SESSION['role'] === 'superadmin') {
-                    header('Location: superadmin/dashboard.php');
-                } elseif ($_SESSION['role'] === 'nurse') {
-                    header('Location: nurse/dashboard.php');
+                if ($update_stmt->execute()) {
+                    // Get user details
+                    $user_query = "SELECT * FROM users WHERE id = :user_id";
+                    $user_stmt = $db->prepare($user_query);
+                    $user_stmt->bindParam(':user_id', $user_id);
+                    $user_stmt->execute();
+                    $user = $user_stmt->fetch(PDO::FETCH_ASSOC);
+                    
+                    if ($user) {
+                        // Set full session variables
+                        $_SESSION['user_id'] = $user['id'];
+                        $_SESSION['username'] = $user['username'];
+                        $_SESSION['full_name'] = $user['full_name'];
+                        $_SESSION['email'] = $user['email'];
+                        $_SESSION['role'] = $user['role'];
+                        $_SESSION['login_time'] = time();
+                        $_SESSION['otp_verified'] = true;
+                        
+                        // Clear temporary session data
+                        unset($_SESSION['temp_user_id']);
+                        unset($_SESSION['temp_username']);
+                        unset($_SESSION['temp_full_name']);
+                        unset($_SESSION['temp_email']);
+                        unset($_SESSION['temp_role']);
+                        unset($_SESSION['login_step']);
+                        unset($_SESSION['otp_expiry']);
+                        
+                        // Create session record in database
+                        $session_token = bin2hex(random_bytes(32));
+                        $ip_address = $_SERVER['REMOTE_ADDR'];
+                        $user_agent = $_SERVER['HTTP_USER_AGENT'];
+                        $expires_at = date('Y-m-d H:i:s', strtotime('+24 hours'));
+                        
+                        $session_query = "INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, expires_at) 
+                                          VALUES (:user_id, :session_token, :ip_address, :user_agent, :expires_at)";
+                        $session_stmt = $db->prepare($session_query);
+                        $session_stmt->bindParam(':user_id', $_SESSION['user_id']);
+                        $session_stmt->bindParam(':session_token', $session_token);
+                        $session_stmt->bindParam(':ip_address', $ip_address);
+                        $session_stmt->bindParam(':user_agent', $user_agent);
+                        $session_stmt->bindParam(':expires_at', $expires_at);
+                        $session_stmt->execute();
+                        
+                        $_SESSION['session_token'] = $session_token;
+                        
+                        // Redirect based on role
+                        if ($_SESSION['role'] === 'superadmin') {
+                            header('Location: superadmin/dashboard.php');
+                        } elseif ($_SESSION['role'] === 'nurse') {
+                            header('Location: nurse/dashboard.php');
+                        } else {
+                            header('Location: admin/dashboard.php');
+                        }
+                        exit();
+                    } else {
+                        $error = 'User not found!';
+                    }
                 } else {
-                    header('Location: admin/dashboard.php');
+                    $error = 'Failed to verify OTP. Please try again.';
                 }
-                exit();
             } else {
                 // Check if OTP exists but expired
                 $expired_query = "SELECT * FROM otp_verification 
@@ -322,9 +338,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 }
 
-// Check for OTP sent flag in URL
-if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
+// Check if we should show OTP form
+$showOTPForm = false;
+if (isset($_SESSION['temp_user_id']) && isset($_SESSION['login_step']) && $_SESSION['login_step'] === 'otp') {
     $showOTPForm = true;
+} elseif (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
+    $showOTPForm = true;
+    $_SESSION['login_step'] = 'otp';
 }
 ?>
 <!DOCTYPE html>
@@ -333,7 +353,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ICARE · staff login</title>
-    <!-- same fonts & icons as landing page -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
@@ -357,7 +376,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
             overflow-x: hidden;
         }
 
-        /* subtle floating shapes (same as landing page) */
         .bg-shape {
             position: absolute;
             width: 500px;
@@ -394,7 +412,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
             100% { transform: translate(50px, 30px) rotate(-18deg); }
         }
 
-        /* main login card — matches landing card aesthetic */
         .auth-container {
             width: 100%;
             max-width: 480px;
@@ -418,7 +435,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
             transform: scale(1.01);
         }
 
-        /* logo + wordmark exactly as landing */
         .logo-wrapper {
             display: flex;
             align-items: center;
@@ -467,7 +483,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
             font-weight: 500;
         }
 
-        /* alert styling */
         .alert {
             padding: 1.1rem 1.5rem;
             border-radius: 100px;
@@ -497,7 +512,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
             font-size: 1.3rem;
         }
 
-        /* form */
         .auth-form {
             display: flex;
             flex-direction: column;
@@ -557,7 +571,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
             font-weight: 400;
         }
 
-        /* OTP specific styles */
         .otp-input {
             text-align: center;
             font-size: 1.5rem !important;
@@ -681,7 +694,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
             width: 100%;
         }
 
-        /* back link */
         .back-link {
             text-align: center;
             margin-top: 2rem;
@@ -703,7 +715,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
             opacity: 1;
         }
 
-        /* role badges (discreet, matches design) */
         .role-hint {
             margin-top: 2.5rem;
             padding-top: 1.5rem;
@@ -738,7 +749,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
             backdrop-filter: blur(2px);
         }
 
-        /* responsive */
         @media (max-width: 500px) {
             .auth-card { padding: 2rem 1.5rem; }
             .logo-text { font-size: 2rem; }
@@ -747,13 +757,11 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
     </style>
 </head>
 <body>
-    <!-- floating background shapes (same as landing) -->
     <div class="bg-shape"></div>
     <div class="bg-shape-two"></div>
 
     <div class="auth-container">
         <div class="auth-card">
-            <!-- logo identical to landing page -->
             <div class="logo-wrapper">
                 <img src="assets/images/clinic.png" alt="ICARE" class="logo-img" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'56\' height=\'56\' viewBox=\'0 0 24 24\' fill=\'%23191970\'%3E%3Cpath d=\'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z\'/%3E%3C/svg%3E';">
                 <span class="logo-text">ICARE<span>clinic</span></span>
@@ -786,20 +794,6 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
                 <div class="alert alert-success">
                     <i class="fas fa-check-circle"></i>
                     <?php echo htmlspecialchars($success); ?>
-                </div>
-            <?php endif; ?>
-            
-            <?php if (isset($_GET['registered'])): ?>
-                <div class="alert alert-success">
-                    <i class="fas fa-check-circle"></i>
-                    Registration successful! Please login.
-                </div>
-            <?php endif; ?>
-            
-            <?php if (isset($_GET['session_expired'])): ?>
-                <div class="alert alert-error">
-                    <i class="fas fa-clock"></i>
-                    Your session has expired. Please login again.
                 </div>
             <?php endif; ?>
             
@@ -851,12 +845,10 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
                 </div>
 
                 <script>
-                    // Timer functionality
                     function startTimer(duration, display) {
                         var timer = duration, minutes, seconds;
                         var endTime = new Date().getTime() + duration * 1000;
                         
-                        // Save end time in localStorage to persist across page reloads
                         localStorage.setItem('otp_end_time', endTime);
                         
                         var interval = setInterval(function () {
@@ -880,7 +872,7 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
                             
                             display.textContent = minutes + ":" + seconds;
                             
-                            if (distance <= 30000) { // Less than 30 seconds
+                            if (distance <= 30000) {
                                 document.getElementById('timer').classList.add('timer-warning');
                             }
                         }, 1000);
@@ -904,20 +896,17 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
                                 localStorage.removeItem('otp_end_time');
                             }
                         } else {
-                            // If no end time in storage, assume 2 minutes from now
                             startTimer(120, display);
                             document.getElementById('resendBtn').disabled = true;
                         }
                     };
 
-                    // Auto-submit when 6 digits are entered
                     document.getElementById('otp_code').addEventListener('input', function(e) {
                         if (this.value.length === 6) {
                             document.getElementById('otpForm').submit();
                         }
                     });
 
-                    // Prevent non-numeric input
                     document.getElementById('otp_code').addEventListener('keypress', function(e) {
                         var charCode = (e.which) ? e.which : e.keyCode;
                         if (charCode > 31 && (charCode < 48 || charCode > 57)) {
@@ -959,7 +948,7 @@ if (isset($_GET['otp_sent']) && isset($_SESSION['temp_user_id'])) {
                 </div>
             <?php endif; ?>
 
-         
+          
         </div>
     </div>
 </body>
