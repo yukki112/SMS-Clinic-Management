@@ -16,12 +16,16 @@ $otpHelper = new OTPHelper($db);
 $error = '';
 $success = '';
 
+// For debugging - check OTP status
+$remaining_time = $otpHelper->getOTPRemainingTime($_SESSION['otp_user_id']);
+
 // Resend OTP
 if (isset($_POST['resend'])) {
     $otp = $otpHelper->generateOTP($_SESSION['otp_user_id'], $_SESSION['otp_email']);
     
     if ($otpHelper->sendOTPEmail($_SESSION['otp_email'], $_SESSION['otp_full_name'], $otp)) {
         $success = 'A new verification code has been sent to your email.';
+        $remaining_time = 120; // Reset timer
     } else {
         $error = 'Failed to send verification code. Please try again.';
     }
@@ -70,9 +74,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['verify'])) {
             unset($_SESSION['otp_email']);
             unset($_SESSION['otp_role']);
             
-            // Clean up expired OTPs
-            $otpHelper->cleanupExpiredOTPs();
-            
             // Redirect based on role
             if ($_SESSION['role'] === 'superadmin') {
                 header('Location: superadmin/dashboard.php');
@@ -84,6 +85,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['verify'])) {
             exit();
         } else {
             $error = 'Invalid or expired verification code. Please try again.';
+            
+            // Debug info - remove in production
+            if ($remaining_time < 0) {
+                $error .= ' (Code expired ' . abs($remaining_time) . ' seconds ago)';
+            } else {
+                $error .= ' (Code still valid for ' . $remaining_time . ' seconds)';
+            }
         }
     }
 }
@@ -519,7 +527,7 @@ $otpHelper->cleanupExpiredOTPs();
 
     <script>
         // Countdown timer for OTP expiry (2 minutes = 120 seconds)
-        let timeLeft = 120;
+        let timeLeft = <?php echo max(0, $remaining_time); ?>;
         const countdownEl = document.getElementById('countdown');
         
         function updateCountdown() {

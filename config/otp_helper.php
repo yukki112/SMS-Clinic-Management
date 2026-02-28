@@ -21,8 +21,9 @@ class OTPHelper {
         // Generate 6-digit OTP
         $otp = sprintf("%06d", mt_rand(1, 999999));
         
-        // Set expiry to 2 minutes from now
-        $expires_at = date('Y-m-d H:i:s', strtotime('+2 minutes'));
+        // Use UTC time for database consistency
+        $now = new DateTime('now', new DateTimeZone('UTC'));
+        $expires_at = $now->modify('+2 minutes')->format('Y-m-d H:i:s');
         
         // Delete any existing OTPs for this user
         $delete_query = "DELETE FROM login_otps WHERE user_id = :user_id";
@@ -58,6 +59,7 @@ class OTPHelper {
             $mail->Password = 'bubr nckn tgqf lvus';
             $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
             $mail->Port       = 587;
+            $mail->SMTPDebug = 0; // Set to 2 for debugging
             
             // Recipients
             $mail->setFrom('noreply@icareclinic.com', 'ICARE Clinic');
@@ -116,14 +118,17 @@ class OTPHelper {
     }
     
     /**
-     * Verify OTP
+     * Verify OTP - FIXED VERSION
      */
     public function verifyOTP($user_id, $otp) {
+        // First, clean up expired OTPs
+        $this->cleanupExpiredOTPs();
+        
+        // Use direct time comparison without relying on MySQL NOW()
         $query = "SELECT * FROM login_otps 
                   WHERE user_id = :user_id 
                   AND otp_code = :otp_code 
                   AND verified = 0 
-                  AND expires_at > NOW() 
                   ORDER BY id DESC LIMIT 1";
         
         $stmt = $this->db->prepare($query);
@@ -134,25 +139,74 @@ class OTPHelper {
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if ($result) {
-            // Mark as verified
-            $update_query = "UPDATE login_otps SET verified = 1 WHERE id = :id";
-            $update_stmt = $this->db->prepare($update_query);
-            $update_stmt->bindParam(':id', $result['id']);
-            $update_stmt->execute();
+            // Check expiry using PHP time (more reliable)
+            $now = new DateTime('now', new DateTimeZone('UTC'));
+            $expires_at = new DateTime($result['expires_at'], new DateTimeZone('UTC'));
             
-            return true;
+            if ($now <= $expires_at) {
+                // Mark as verified
+                $update_query = "UPDATE login_otps SET verified = 1 WHERE id = :id";
+                $update_stmt = $this->db->prepare($update_query);
+                $update_stmt->bindParam(':id', $result['id']);
+                $update_stmt->execute();
+                
+                return true;
+            } else {
+                // OTP expired - delete it
+                $delete_query = "DELETE FROM login_otps WHERE id = :id";
+                $delete_stmt = $this->db->prepare($delete_query);
+                $delete_stmt->bindParam(':id', $result['id']);
+                $delete_stmt->execute();
+                
+                return false;
+            }
         }
         
         return false;
     }
     
     /**
-     * Clean up expired OTPs
+     * Clean up expired OTPs - FIXED VERSION
      */
     public function cleanupExpiredOTPs() {
-        $query = "DELETE FROM login_otps WHERE expires_at <= NOW()";
+        $now = new DateTime('now', new DateTimeZone('UTC'));
+        $now_str = $now->format('Y-m-d H:i:s');
+        
+        $query = "DELETE FROM login_otps WHERE expires_at <= :now";
         $stmt = $this->db->prepare($query);
+        $stmt->bindParam(':now', $now_str);
         $stmt->execute();
+    }
+    
+    /**
+     * Get OTP time remaining in seconds (for debugging)
+     */
+    public function getOTPRemainingTime($user_id) {
+        $query = "SELECT expires_at FROM login_otps 
+                  WHERE user_id = :user_id AND verified = 0 
+                  ORDER BY id DESC LIMIT 1";
+        
+        $stmt = $this->db->prepare($query);
+        $stmt->bindParam(':user_id', $user_id);
+        $stmt->execute();
+        
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($result) {
+            $now = new DateTime('now', new DateTimeZone('UTC'));
+            $expires_at = new DateTime($result['expires_at'], new DateTimeZone('UTC'));
+            $interval = $now->diff($expires_at);
+            
+            $seconds = ($interval->invert ? -1 : 1) * 
+                       ($interval->days * 86400 + 
+                        $interval->h * 3600 + 
+                        $interval->i * 60 + 
+                        $interval->s);
+            
+            return $seconds;
+        }
+        
+        return 0;
     }
 }
 ?>
