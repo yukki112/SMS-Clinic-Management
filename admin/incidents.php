@@ -632,7 +632,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
 
         body {
             font-family: 'Inter', sans-serif;
-            background: #f8fafc;
+            background: #eceff1;
             min-height: 100vh;
             position: relative;
             overflow-x: hidden;
@@ -650,7 +650,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             padding: 20px 30px 30px 30px;
             transition: margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
-            background: #f8fafc;
+            background: #eceff1;
         }
 
         .main-content.expanded {
@@ -670,15 +670,13 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .welcome-section h1 {
             font-size: 2.2rem;
             font-weight: 700;
-            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: #191970;
             margin-bottom: 8px;
             letter-spacing: -0.5px;
         }
 
         .welcome-section p {
-            color: #64748b;
+            color: #546e7a;
             font-size: 1rem;
             font-weight: 400;
         }
@@ -701,19 +699,19 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
 
         .modal-container {
             background: white;
-            border-radius: 24px;
+            border-radius: 16px;
             width: 90%;
             max-width: 450px;
             padding: 30px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 8px 16px rgba(25, 25, 112, 0.2);
             animation: slideUp 0.3s ease;
         }
 
         .modal-icon {
             width: 70px;
             height: 70px;
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            border-radius: 20px;
+            background: #191970;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -729,13 +727,13 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .modal-title {
             font-size: 1.5rem;
             font-weight: 700;
-            color: #1e293b;
+            color: #191970;
             text-align: center;
             margin-bottom: 10px;
         }
 
         .modal-subtitle {
-            color: #64748b;
+            color: #546e7a;
             text-align: center;
             margin-bottom: 25px;
             font-size: 0.9rem;
@@ -754,7 +752,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             display: block;
             font-size: 0.8rem;
             font-weight: 600;
-            color: #64748b;
+            color: #546e7a;
             margin-bottom: 8px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -764,15 +762,15 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             width: 100%;
             padding: 14px 16px;
             font-size: 1rem;
-            border: 2px solid #e2e8f0;
-            border-radius: 12px;
+            border: 2px solid #cfd8dc;
+            border-radius: 10px;
             transition: all 0.3s ease;
         }
 
         .modal-form .form-control:focus {
             outline: none;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            border-color: #191970;
+            box-shadow: 0 0 0 3px rgba(25, 25, 112, 0.1);
         }
 
         .modal-actions {
@@ -785,7 +783,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             flex: 1;
             padding: 14px;
             border: none;
-            border-radius: 12px;
+            border-radius: 10px;
             font-size: 0.9rem;
             font-weight: 600;
             cursor: pointer;
@@ -793,30 +791,32 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         }
 
         .modal-btn.primary {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            background: #191970;
             color: white;
         }
 
         .modal-btn.primary:hover {
+            background: #24248f;
             transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.3);
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.2);
         }
 
         .modal-btn.secondary {
-            background: #f1f5f9;
-            color: #1e293b;
+            background: #eceff1;
+            color: #37474f;
+            border: 1px solid #cfd8dc;
         }
 
         .modal-btn.secondary:hover {
-            background: #e2e8f0;
+            background: #cfd8dc;
         }
 
         .modal-error {
-            background: #fee2e2;
-            border: 1px solid #fca5a5;
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
             border-radius: 12px;
             padding: 12px 16px;
-            color: #991b1b;
+            color: #c62828;
             font-size: 0.9rem;
             margin-bottom: 20px;
             display: flex;
@@ -851,27 +851,27 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
 
         .stat-card {
             background: white;
-            border-radius: 20px;
+            border-radius: 16px;
             padding: 24px;
             display: flex;
             align-items: center;
             gap: 16px;
             transition: all 0.3s ease;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
         }
 
         .stat-card:hover {
             transform: translateY(-4px);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-            border-color: #3b82f6;
+            box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
+            border-color: #191970;
         }
 
         .stat-icon {
             width: 60px;
             height: 60px;
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            border-radius: 16px;
+            background: #191970;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -886,12 +886,12 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .stat-info h3 {
             font-size: 2rem;
             font-weight: 700;
-            color: #1e293b;
+            color: #191970;
             margin-bottom: 4px;
         }
 
         .stat-info p {
-            color: #64748b;
+            color: #546e7a;
             font-size: 0.8rem;
             font-weight: 500;
             text-transform: uppercase;
@@ -899,8 +899,8 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         }
 
         .warning-badge {
-            background: #fee2e2;
-            color: #dc2626;
+            background: #ffebee;
+            color: #c62828;
             padding: 4px 8px;
             border-radius: 20px;
             font-size: 0.7rem;
@@ -921,15 +921,21 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         }
 
         .alert-success {
-            background: #dcfce7;
-            border: 1px solid #86efac;
-            color: #166534;
+            background: #e8f5e9;
+            border: 1px solid #a5d6a7;
+            color: #2e7d32;
         }
 
         .alert-error {
-            background: #fee2e2;
-            border: 1px solid #fca5a5;
-            color: #991b1b;
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            color: #c62828;
+        }
+
+        .alert-info {
+            background: #e3f2fd;
+            border: 1px solid #90caf9;
+            color: #1565c0;
         }
 
         @keyframes slideIn {
@@ -955,16 +961,16 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         /* Search Card */
         .search-card {
             background: white;
-            border-radius: 20px;
+            border-radius: 16px;
             padding: 24px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
         }
 
         .card-title {
             font-size: 1.1rem;
             font-weight: 600;
-            color: #1e293b;
+            color: #191970;
             margin-bottom: 20px;
             display: flex;
             align-items: center;
@@ -974,7 +980,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .card-title svg {
             width: 24px;
             height: 24px;
-            color: #3b82f6;
+            color: #191970;
         }
 
         .incident-type-badge {
@@ -986,18 +992,18 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         }
 
         .type-emergency {
-            background: #fee2e2;
-            color: #dc2626;
+            background: #ffebee;
+            color: #c62828;
         }
 
         .type-minor {
-            background: #fff7ed;
-            color: #ea580c;
+            background: #fff3e0;
+            color: #e65100;
         }
 
         .type-incident {
-            background: #dbeafe;
-            color: #2563eb;
+            background: #e3f2fd;
+            color: #1565c0;
         }
 
         .search-form {
@@ -1012,7 +1018,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             display: block;
             font-size: 0.8rem;
             font-weight: 600;
-            color: #64748b;
+            color: #546e7a;
             margin-bottom: 6px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -1022,22 +1028,22 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             width: 100%;
             padding: 12px 16px;
             font-size: 0.95rem;
-            border: 2px solid #e2e8f0;
-            border-radius: 12px;
+            border: 2px solid #cfd8dc;
+            border-radius: 10px;
             transition: all 0.3s ease;
             background: white;
-            color: #1e293b;
+            color: #37474f;
         }
 
         .form-control:focus {
             outline: none;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            border-color: #191970;
+            box-shadow: 0 0 0 3px rgba(25, 25, 112, 0.1);
         }
 
         select.form-control {
             appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23546e7a' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
             background-repeat: no-repeat;
             background-position: right 12px center;
             background-size: 16px;
@@ -1063,7 +1069,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .btn {
             padding: 12px 24px;
             border: none;
-            border-radius: 12px;
+            border-radius: 10px;
             font-size: 0.95rem;
             font-weight: 600;
             cursor: pointer;
@@ -1071,34 +1077,37 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            background: #191970;
             color: white;
             width: 100%;
         }
 
         .btn-primary:hover {
+            background: #24248f;
             transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.3);
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.2);
         }
 
         .btn-danger {
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            background: #c62828;
             color: white;
         }
 
         .btn-danger:hover {
+            background: #b71c1c;
             transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.3);
+            box-shadow: 0 4px 12px rgba(198, 40, 40, 0.2);
         }
 
         .btn-warning {
-            background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+            background: #e65100;
             color: white;
         }
 
         .btn-warning:hover {
+            background: #bf360c;
             transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(249, 115, 22, 0.3);
+            box-shadow: 0 4px 12px rgba(230, 81, 0, 0.2);
         }
 
         .btn-sm {
@@ -1109,10 +1118,10 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         /* Quick Stats Card */
         .quick-stats-card {
             background: white;
-            border-radius: 20px;
+            border-radius: 16px;
             padding: 24px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
         }
 
         .type-list {
@@ -1124,7 +1133,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             align-items: center;
             justify-content: space-between;
             padding: 12px 0;
-            border-bottom: 1px solid #f1f5f9;
+            border-bottom: 1px solid #eceff1;
         }
 
         .type-item:last-child {
@@ -1133,12 +1142,12 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
 
         .type-name {
             font-weight: 500;
-            color: #1e293b;
+            color: #37474f;
         }
 
         .type-count {
-            background: #f1f5f9;
-            color: #1e293b;
+            background: #eceff1;
+            color: #37474f;
             padding: 4px 12px;
             border-radius: 30px;
             font-size: 0.8rem;
@@ -1148,30 +1157,30 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         /* Incident Form Card */
         .incident-form-card {
             background: white;
-            border-radius: 24px;
+            border-radius: 16px;
             padding: 30px;
             margin-bottom: 30px;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
             animation: fadeInUp 0.8s ease;
         }
 
         .student-info-bar {
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-            border-radius: 16px;
+            background: #eceff1;
+            border-radius: 12px;
             padding: 20px;
             margin-bottom: 24px;
             display: flex;
             align-items: center;
             gap: 20px;
-            border: 1px solid #e2e8f0;
+            border: 1px solid #cfd8dc;
         }
 
         .student-avatar-sm {
             width: 70px;
             height: 70px;
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            border-radius: 16px;
+            background: #191970;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1183,18 +1192,18 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .student-details h3 {
             font-size: 1.3rem;
             font-weight: 600;
-            color: #1e293b;
+            color: #191970;
             margin-bottom: 6px;
         }
 
         .student-details p {
-            color: #64748b;
+            color: #546e7a;
             font-size: 0.95rem;
         }
 
         .medical-condition-tag {
-            background: #fee2e2;
-            color: #dc2626;
+            background: #ffebee;
+            color: #c62828;
             padding: 6px 12px;
             border-radius: 30px;
             font-size: 0.8rem;
@@ -1207,8 +1216,8 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .emergency-contact-info {
             margin-top: 12px;
             padding: 12px 16px;
-            background: #fff7ed;
-            border: 1px solid #fed7aa;
+            background: #fff3e0;
+            border: 1px solid #ffb74d;
             border-radius: 12px;
             display: flex;
             flex-wrap: wrap;
@@ -1220,19 +1229,19 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             display: flex;
             align-items: center;
             gap: 8px;
-            color: #9a3412;
+            color: #e65100;
             font-size: 0.9rem;
         }
 
         .emergency-contact-item svg {
             width: 18px;
             height: 18px;
-            color: #ea580c;
+            color: #e65100;
         }
 
         .email-badge {
-            background: #dbeafe;
-            color: #2563eb;
+            background: #e3f2fd;
+            color: #1565c0;
             padding: 4px 12px;
             border-radius: 30px;
             font-size: 0.8rem;
@@ -1264,56 +1273,56 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .type-option label {
             display: block;
             padding: 20px;
-            background: #f8fafc;
-            border: 2px solid #e2e8f0;
-            border-radius: 16px;
+            background: #eceff1;
+            border: 2px solid #cfd8dc;
+            border-radius: 12px;
             text-align: center;
             cursor: pointer;
             transition: all 0.3s ease;
         }
 
         .type-option input[type="radio"]:checked + label {
-            background: #dbeafe;
-            border-color: #3b82f6;
+            background: #e3f2fd;
+            border-color: #191970;
         }
 
         .type-option input[type="radio"]:checked + label .type-icon,
         .type-option input[type="radio"]:checked + label .type-title {
-            color: #2563eb;
+            color: #191970;
         }
 
         .type-option label:hover {
-            border-color: #3b82f6;
+            border-color: #191970;
             transform: translateY(-2px);
         }
 
         .type-icon {
             font-size: 28px;
             margin-bottom: 10px;
-            color: #64748b;
+            color: #546e7a;
             transition: color 0.3s ease;
         }
 
         .type-title {
             font-weight: 600;
             font-size: 1rem;
-            color: #1e293b;
+            color: #37474f;
             transition: color 0.3s ease;
         }
 
         .type-desc {
             font-size: 0.75rem;
-            color: #64748b;
+            color: #78909c;
             margin-top: 6px;
         }
 
         /* Form Sections */
         .form-section {
-            background: #f8fafc;
-            border-radius: 16px;
+            background: #eceff1;
+            border-radius: 12px;
             padding: 24px;
             margin: 24px 0;
-            border: 1px solid #e2e8f0;
+            border: 1px solid #cfd8dc;
         }
 
         .section-header {
@@ -1321,7 +1330,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             align-items: center;
             gap: 10px;
             margin-bottom: 20px;
-            color: #1e293b;
+            color: #191970;
             font-weight: 600;
             font-size: 1rem;
         }
@@ -1329,7 +1338,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .section-header svg {
             width: 20px;
             height: 20px;
-            color: #3b82f6;
+            color: #191970;
         }
 
         /* Vital Signs Grid */
@@ -1347,7 +1356,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .vital-input label {
             display: block;
             font-size: 0.75rem;
-            color: #64748b;
+            color: #546e7a;
             margin-bottom: 6px;
             text-transform: uppercase;
             font-weight: 600;
@@ -1362,10 +1371,10 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         /* Items Used Section */
         .items-section {
             background: white;
-            border-radius: 12px;
+            border-radius: 10px;
             padding: 16px;
             margin: 16px 0;
-            border: 1px solid #e2e8f0;
+            border: 1px solid #cfd8dc;
         }
 
         .items-header {
@@ -1377,7 +1386,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
 
         .items-header h4 {
             font-size: 0.9rem;
-            color: #1e293b;
+            color: #191970;
             font-weight: 600;
         }
 
@@ -1387,10 +1396,10 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             gap: 10px;
             margin-bottom: 10px;
             align-items: center;
-            background: #f8fafc;
+            background: #eceff1;
             padding: 10px;
             border-radius: 10px;
-            border: 1px solid #e2e8f0;
+            border: 1px solid #cfd8dc;
         }
 
         .item-select {
@@ -1403,13 +1412,13 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
 
         .item-stock {
             font-size: 0.7rem;
-            color: #64748b;
+            color: #546e7a;
             text-align: center;
         }
 
         .remove-item {
-            background: #fee2e2;
-            color: #dc2626;
+            background: #ffebee;
+            color: #c62828;
             border: none;
             width: 32px;
             height: 32px;
@@ -1422,14 +1431,14 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         }
 
         .remove-item:hover {
-            background: #dc2626;
+            background: #c62828;
             color: white;
         }
 
         .add-item-btn {
             background: none;
-            border: 2px dashed #3b82f6;
-            color: #3b82f6;
+            border: 2px dashed #191970;
+            color: #191970;
             padding: 10px;
             border-radius: 10px;
             width: 100%;
@@ -1441,8 +1450,8 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         }
 
         .add-item-btn:hover {
-            background: #dbeafe;
-            border-color: #2563eb;
+            background: #e3f2fd;
+            border-color: #24248f;
         }
 
         /* Disposition Grid */
@@ -1467,33 +1476,33 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         .disposition-option label {
             display: block;
             padding: 12px;
-            background: #f8fafc;
-            border: 2px solid #e2e8f0;
-            border-radius: 12px;
+            background: #eceff1;
+            border: 2px solid #cfd8dc;
+            border-radius: 10px;
             text-align: center;
             font-size: 0.9rem;
             font-weight: 500;
-            color: #1e293b;
+            color: #37474f;
             cursor: pointer;
             transition: all 0.3s ease;
         }
 
         .disposition-option input[type="radio"]:checked + label {
-            background: #dbeafe;
-            border-color: #3b82f6;
-            color: #2563eb;
+            background: #e3f2fd;
+            border-color: #191970;
+            color: #191970;
         }
 
         .disposition-option label:hover {
-            border-color: #3b82f6;
+            border-color: #191970;
         }
 
         /* Tabs */
         .tabs-section {
             background: white;
-            border-radius: 24px;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
             overflow: hidden;
             margin-top: 30px;
             animation: fadeInUp 0.9s ease;
@@ -1501,8 +1510,8 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
 
         .tabs-header {
             display: flex;
-            border-bottom: 2px solid #f1f5f9;
-            background: #f8fafc;
+            border-bottom: 2px solid #eceff1;
+            background: #f5f5f5;
             overflow-x: auto;
             padding: 0 20px;
         }
@@ -1513,7 +1522,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             border: none;
             font-size: 0.95rem;
             font-weight: 600;
-            color: #64748b;
+            color: #78909c;
             cursor: pointer;
             transition: all 0.3s ease;
             position: relative;
@@ -1521,11 +1530,12 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         }
 
         .tab-btn:hover {
-            color: #3b82f6;
+            color: #191970;
+            background: rgba(25, 25, 112, 0.05);
         }
 
         .tab-btn.active {
-            color: #3b82f6;
+            color: #191970;
         }
 
         .tab-btn.active::after {
@@ -1535,7 +1545,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             left: 0;
             right: 0;
             height: 2px;
-            background: #3b82f6;
+            background: #191970;
         }
 
         .tab-content {
@@ -1553,8 +1563,8 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         /* Tables */
         .table-wrapper {
             overflow-x: auto;
-            border-radius: 16px;
-            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            border: 1px solid #cfd8dc;
         }
 
         .data-table {
@@ -1567,32 +1577,32 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             padding: 16px 12px;
             font-size: 0.8rem;
             font-weight: 600;
-            color: #64748b;
+            color: #78909c;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            border-bottom: 2px solid #e2e8f0;
-            background: #f8fafc;
+            border-bottom: 2px solid #cfd8dc;
+            background: #eceff1;
         }
 
         .data-table td {
             padding: 16px 12px;
             font-size: 0.9rem;
-            color: #1e293b;
-            border-bottom: 1px solid #f1f5f9;
+            color: #37474f;
+            border-bottom: 1px solid #eceff1;
         }
 
         .data-table tr:hover td {
-            background: #f8fafc;
+            background: #f5f5f5;
         }
 
         .incident-code {
             font-weight: 600;
-            color: #3b82f6;
+            color: #191970;
         }
 
         .parent-response {
-            background: #dcfce7;
-            color: #166534;
+            background: #e8f5e9;
+            color: #2e7d32;
             padding: 4px 8px;
             border-radius: 30px;
             font-size: 0.7rem;
@@ -1600,14 +1610,14 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
         }
 
         .parent-response.not-reachable {
-            background: #fee2e2;
-            color: #991b1b;
+            background: #ffebee;
+            color: #c62828;
         }
 
         .empty-state {
             text-align: center;
             padding: 60px 20px;
-            color: #64748b;
+            color: #78909c;
         }
 
         .empty-state svg {
@@ -1615,18 +1625,18 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
             height: 80px;
             margin-bottom: 20px;
             opacity: 0.5;
-            color: #94a3b8;
+            color: #90a4ae;
         }
 
         .empty-state p {
             font-size: 1.1rem;
             margin-bottom: 5px;
-            color: #1e293b;
+            color: #37474f;
         }
 
         .empty-state small {
             font-size: 0.85rem;
-            color: #64748b;
+            color: #78909c;
         }
 
         @keyframes fadeInUp {
@@ -1797,7 +1807,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         </form>
 
                         <?php if ($search_error): ?>
-                            <div style="margin-top: 15px; padding: 12px; background: #fee2e2; border-radius: 12px; color: #991b1b; font-size: 0.9rem;">
+                            <div style="margin-top: 15px; padding: 12px; background: #ffebee; border-radius: 12px; color: #c62828; font-size: 0.9rem;">
                                 <?php echo $search_error; ?>
                             </div>
                         <?php endif; ?>
@@ -1805,7 +1815,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         <!-- Quick Type Stats -->
                         <?php if (!empty($stats['by_type'])): ?>
                             <div style="margin-top: 24px;">
-                                <div style="font-size: 0.9rem; font-weight: 600; color: #1e293b; margin-bottom: 12px;">
+                                <div style="font-size: 0.9rem; font-weight: 600; color: #191970; margin-bottom: 12px;">
                                     Incidents by Type (30 days)
                                 </div>
                                 <ul class="type-list">
@@ -1835,8 +1845,8 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         </div>
                         
                         <div style="margin-bottom: 20px;">
-                            <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 8px;">Total Incidents This Month</div>
-                            <div style="font-size: 2rem; font-weight: 700; color: #1e293b;">
+                            <div style="font-size: 0.9rem; color: #546e7a; margin-bottom: 8px;">Total Incidents This Month</div>
+                            <div style="font-size: 2rem; font-weight: 700; color: #191970;">
                                 <?php 
                                 $total = 0;
                                 foreach ($stats['by_type'] as $type) {
@@ -1848,18 +1858,18 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         </div>
 
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                            <div style="background: #f1f5f9; padding: 16px; border-radius: 16px; text-align: center;">
-                                <div style="font-size: 1.5rem; font-weight: 700; color: #ea580c;"><?php echo count($incidents_minor); ?></div>
-                                <div style="font-size: 0.8rem; color: #64748b;">Minor Injuries</div>
+                            <div style="background: #eceff1; padding: 16px; border-radius: 12px; text-align: center;">
+                                <div style="font-size: 1.5rem; font-weight: 700; color: #e65100;"><?php echo count($incidents_minor); ?></div>
+                                <div style="font-size: 0.8rem; color: #546e7a;">Minor Injuries</div>
                             </div>
-                            <div style="background: #f1f5f9; padding: 16px; border-radius: 16px; text-align: center;">
-                                <div style="font-size: 1.5rem; font-weight: 700; color: #dc2626;"><?php echo count($incidents_emergency); ?></div>
-                                <div style="font-size: 0.8rem; color: #64748b;">Emergencies</div>
+                            <div style="background: #eceff1; padding: 16px; border-radius: 12px; text-align: center;">
+                                <div style="font-size: 1.5rem; font-weight: 700; color: #c62828;"><?php echo count($incidents_emergency); ?></div>
+                                <div style="font-size: 0.8rem; color: #546e7a;">Emergencies</div>
                             </div>
                         </div>
 
                         <div style="margin-top: 20px;">
-                            <div style="font-size: 0.9rem; font-weight: 600; color: #1e293b; margin-bottom: 12px;">
+                            <div style="font-size: 0.9rem; font-weight: 600; color: #191970; margin-bottom: 12px;">
                                 Common Locations
                             </div>
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
@@ -1932,7 +1942,6 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                             </svg>
                                             <span class="email-badge">
                                                 <?php echo htmlspecialchars($student_data['emergency_email']); ?>
-                                                
                                             </span>
                                         </div>
                                     <?php endif; ?>
@@ -2077,7 +2086,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                             <div class="items-section">
                                 <div class="items-header">
                                     <h4>💊 Medicines / Supplies Used</h4>
-                                    <span style="font-size: 0.75rem; color: #64748b;">Items will be deducted from inventory</span>
+                                    <span style="font-size: 0.75rem; color: #546e7a;">Items will be deducted from inventory</span>
                                 </div>
                                 
                                 <div id="items-container">
@@ -2109,7 +2118,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
 
                         <!-- Emergency Case Section -->
                         <div class="form-section" id="emergency-section" style="display: none;">
-                            <div class="section-header" style="color: #dc2626;">
+                            <div class="section-header" style="color: #c62828;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M18 10v4M12 6v8M6 14v-2"/>
                                     <circle cx="12" cy="12" r="10"/>
@@ -2194,13 +2203,12 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                             <?php if (!empty($student_data['emergency_email'])): ?>
                                 <div class="form-group">
                                     <label>Emergency Email</label>
-                                    <div style="padding: 12px; background: #dbeafe; border-radius: 10px; color: #2563eb; display: flex; align-items: center; gap: 10px;">
+                                    <div style="padding: 12px; background: #e3f2fd; border-radius: 10px; color: #1565c0; display: flex; align-items: center; gap: 10px;">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
                                             <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
                                             <polyline points="22,6 12,13 2,6"/>
                                         </svg>
                                         <strong><?php echo htmlspecialchars($student_data['emergency_email']); ?></strong>
-                                        <span style="font-size: 0.85rem; color: #1e40af;"></span>
                                     </div>
                                 </div>
                             <?php endif; ?>
@@ -2249,8 +2257,8 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         <!-- All Incidents Tab -->
                         <div class="tab-pane active" id="all">
                             <div class="section-header">
-                                <h2 style="color: #1e293b;">Recent Incidents</h2>
-                                <span style="color: #64748b;">Last 50 records</span>
+                                <h2 style="color: #191970;">Recent Incidents</h2>
+                                <span style="color: #546e7a;">Last 50 records</span>
                             </div>
                             
                             <?php if (!empty($incidents_all)): ?>
@@ -2275,11 +2283,11 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                                     </td>
                                                     <td>
                                                         <strong><?php echo htmlspecialchars($incident['student_name']); ?></strong><br>
-                                                        <small style="color: #64748b;"><?php echo htmlspecialchars($incident['student_id']); ?></small>
+                                                        <small style="color: #546e7a;"><?php echo htmlspecialchars($incident['student_id']); ?></small>
                                                     </td>
                                                     <td>
                                                         <?php echo date('M d, Y', strtotime($incident['incident_date'])); ?><br>
-                                                        <small style="color: #64748b;"><?php echo date('h:i A', strtotime($incident['incident_time'])); ?></small>
+                                                        <small style="color: #546e7a;"><?php echo date('h:i A', strtotime($incident['incident_time'])); ?></small>
                                                     </td>
                                                     <td>
                                                         <span class="incident-type-badge type-<?php echo strtolower($incident['incident_type']); ?>">
@@ -2296,7 +2304,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                                                                 <?php echo htmlspecialchars($incident['parent_name']); ?>
                                                             </span>
                                                         <?php else: ?>
-                                                            <small style="color: #94a3b8;">Not notified</small>
+                                                            <small style="color: #90a4ae;">Not notified</small>
                                                         <?php endif; ?>
                                                     </td>
                                                 </tr>
@@ -2320,8 +2328,8 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         <!-- Emergencies Tab -->
                         <div class="tab-pane" id="emergency">
                             <div class="section-header">
-                                <h2 style="color: #dc2626;">🚨 Emergency Cases</h2>
-                                <span style="color: #64748b;">Requires immediate attention</span>
+                                <h2 style="color: #c62828;">🚨 Emergency Cases</h2>
+                                <span style="color: #546e7a;">Requires immediate attention</span>
                             </div>
                             
                             <?php if (!empty($incidents_emergency)): ?>
@@ -2378,8 +2386,8 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         <!-- Minor Injuries Tab -->
                         <div class="tab-pane" id="minor">
                             <div class="section-header">
-                                <h2 style="color: #ea580c;">🩹 Minor Injuries</h2>
-                                <span style="color: #64748b;">Quick treatment cases</span>
+                                <h2 style="color: #e65100;">🩹 Minor Injuries</h2>
+                                <span style="color: #546e7a;">Quick treatment cases</span>
                             </div>
                             
                             <?php if (!empty($incidents_minor)): ?>
@@ -2433,8 +2441,8 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                         <!-- Regular Incidents Tab -->
                         <div class="tab-pane" id="regular">
                             <div class="section-header">
-                                <h2 style="color: #2563eb;">📝 Regular Incidents</h2>
-                                <span style="color: #64748b;">School-related events</span>
+                                <h2 style="color: #1565c0;">📝 Regular Incidents</h2>
+                                <span style="color: #546e7a;">School-related events</span>
                             </div>
                             
                             <?php if (!empty($incidents_regular)): ?>
@@ -2528,7 +2536,7 @@ $incidents_regular = getIncidentsByType($db, 'Incident');
                     <button type="submit" name="verify_access" class="modal-btn primary">Verify & Access</button>
                 </div>
             </form>
-            <p style="text-align: center; margin-top: 20px; font-size: 0.8rem; color: #64748b;">
+            <p style="text-align: center; margin-top: 20px; font-size: 0.8rem; color: #546e7a;">
                 This helps us maintain confidentiality of student records
             </p>
         </div>
