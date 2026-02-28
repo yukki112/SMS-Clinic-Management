@@ -441,7 +441,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
             <div class="auth-header">
                 <h2>Sign In</h2>
-                <p><i class="fas fa-shield-alt" style="margin-right: 0.3rem;"></i></p>
+              
             </div>
             
             <?php if ($error): ?>
