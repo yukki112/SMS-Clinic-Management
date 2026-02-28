@@ -51,18 +51,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                             <span class="nav-badge">Super</span>
                         </a>
                     </li>
-                    <li class="nav-item <?php echo $current_page == 'analytics.php' ? 'active' : ''; ?>">
-                        <a href="analytics.php" class="nav-link">
-                            <div class="nav-icon-wrapper">
-                                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                    <path d="M3 3V21H21" stroke-linecap="round" stroke-linejoin="round"/>
-                                    <path d="M7 15L10 11L13 14L20 7" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <span class="nav-label">Analytics</span>
-                            <span class="nav-badge">New</span>
-                        </a>
-                    </li>
+                   
                 </ul>
             </div>
 
