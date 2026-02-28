@@ -1,8 +1,4 @@
-I apologize for the error! You're right, I didn't properly check your database structure. Let me fix this immediately by using only the tables and columns that actually exist in your database.
 
-Here's the corrected `dashboard.php` with proper database queries:
-
-```php
 <?php
 session_start();
 require_once '../config/database.php';
@@ -460,72 +456,239 @@ $insights[] = [
         font-weight: 600;
     }
 
-    /* AI Insights Section */
-    .insights-section {
-        margin-bottom: 30px;
-        animation: fadeInUp 0.65s ease;
-    }
+    /* AI Insights Section - Enhanced Premium Design */
+.insights-section {
+    margin-bottom: 30px;
+    animation: fadeInUp 0.65s ease;
+    position: relative;
+}
 
-    .insights-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 20px;
-    }
+.insights-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    position: relative;
+}
 
-    .insights-header h2 {
-        font-size: 1.3rem;
-        font-weight: 600;
-        color: #191970;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
+.insights-header h2 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #191970;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+}
 
-    .insights-header h2 svg {
-        width: 24px;
-        height: 24px;
-    }
+.insights-header h2::before {
+    content: '';
+    position: absolute;
+    left: -10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 24px;
+    background: linear-gradient(135deg, #191970, #4a4ab0);
+    border-radius: 4px;
+}
 
+.insights-header h2 svg {
+    width: 24px;
+    height: 24px;
+    filter: drop-shadow(0 2px 4px rgba(25, 25, 112, 0.2));
+}
+
+.insights-header span {
+    color: #78909c;
+    font-size: 0.9rem;
+    background: rgba(255, 255, 255, 0.7);
+    padding: 4px 12px;
+    border-radius: 30px;
+    border: 1px solid #cfd8dc;
+    backdrop-filter: blur(5px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.insights-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    position: relative;
+}
+
+/* AI Background Glow Effect */
+.insights-section::before {
+    content: '';
+    position: absolute;
+    top: -20px;
+    right: 10%;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, rgba(25, 25, 112, 0.03) 0%, transparent 70%);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.insight-card {
+    background: white;
+    border-radius: 20px;
+    padding: 24px;
+    position: relative;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(207, 216, 220, 0.5);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    z-index: 1;
+    backdrop-filter: blur(10px);
+}
+
+/* Animated gradient border on hover */
+.insight-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 20px;
+    padding: 2px;
+    background: linear-gradient(135deg, #191970, #4a4ab0, #191970);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.insight-card:hover::before {
+    opacity: 0.5;
+}
+
+.insight-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 30px -10px rgba(25, 25, 112, 0.15);
+    border-color: transparent;
+}
+
+/* AI Icon Container */
+.insight-icon {
+    font-size: 28px;
+    margin-bottom: 16px;
+    display: inline-block;
+    position: relative;
+}
+
+/* Pulse animation for warning icons */
+.insight-icon[data-type="warning"] {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+/* Title with subtle gradient */
+.insight-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #191970;
+    margin-bottom: 10px;
+    position: relative;
+    display: inline-block;
+}
+
+/* Message with better readability */
+.insight-message {
+    font-size: 0.9rem;
+    color: #546e7a;
+    line-height: 1.5;
+    position: relative;
+}
+
+/* Small decorative elements */
+.insight-card::after {
+    content: '';
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    width: 40px;
+    height: 40px;
+    background: radial-gradient(circle, rgba(25, 25, 112, 0.03) 0%, transparent 70%);
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+/* Different left border colors based on insight type */
+.insight-card[data-type="trend"] { border-left: 4px solid #191970; }
+.insight-card[data-type="warning"] { border-left: 4px solid #c62828; }
+.insight-card[data-type="info"] { border-left: 4px solid #ed6c02; }
+.insight-card[data-type="health"] { border-left: 4px solid #1565c0; }
+.insight-card[data-type="staff"] { border-left: 4px solid #6b2b5e; }
+.insight-card[data-type="appointment"] { border-left: 4px solid #1976d2; }
+.insight-card[data-type="success"] { border-left: 4px solid #2e7d32; }
+
+/* Loading shimmer effect for cards */
+.insight-card.loading {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* AI Brain icon animation */
+.insights-header h2 svg {
+    animation: pulse-light 3s infinite;
+}
+
+@keyframes pulse-light {
+    0% { opacity: 0.7; }
+    50% { opacity: 1; }
+    100% { opacity: 0.7; }
+}
+
+/* Responsive adjustments */
+@media (max-width: 1280px) {
     .insights-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 20px;
+        grid-template-columns: repeat(2, 1fr);
     }
+    
+    .insights-section::before {
+        width: 200px;
+        height: 200px;
+    }
+}
 
+@media (max-width: 768px) {
+    .insights-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .insights-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .insights-section::before {
+        display: none;
+    }
+}
+
+/* Dark mode support (if needed) */
+@media (prefers-color-scheme: dark) {
     .insight-card {
-        background: white;
-        border-radius: 16px;
-        padding: 20px;
-        border-left: 4px solid;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        border: 1px solid #cfd8dc;
-        transition: all 0.3s ease;
+        background: rgba(255, 255, 255, 0.95);
     }
-
-    .insight-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
-    }
-
-    .insight-icon {
-        font-size: 24px;
-        margin-bottom: 12px;
-    }
-
-    .insight-title {
-        font-size: 1rem;
-        font-weight: 600;
-        color: #191970;
-        margin-bottom: 8px;
-    }
-
-    .insight-message {
-        font-size: 0.9rem;
-        color: #546e7a;
-        line-height: 1.5;
-    }
-
+}
     /* Analytics Section */
     .analytics-section {
         display: grid;
@@ -1065,29 +1228,41 @@ $insights[] = [
                     </div>
                 </div>
 
-                <!-- AI-Powered Insights Section -->
-                <div class="insights-section">
-                    <div class="insights-header">
-                        <h2>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
-                                <circle cx="12" cy="12" r="10"/>
-                                <path d="M12 16v-4M12 8h.01"/>
-                            </svg>
-                            AI-Powered Insights
-                        </h2>
-                        <span style="color: #78909c; font-size: 0.9rem;">Based on your clinic's data</span>
-                    </div>
-                    <div class="insights-grid">
-                        <?php foreach ($insights as $insight): ?>
-                        <div class="insight-card" style="border-left-color: <?php echo $insight['color']; ?>">
-                            <div class="insight-icon"><?php echo $insight['icon']; ?></div>
-                            <div class="insight-title"><?php echo $insight['title']; ?></div>
-                            <div class="insight-message"><?php echo $insight['message']; ?></div>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-
+            <!-- AI-Powered Insights Section -->
+<div class="insights-section">
+    <div class="insights-header">
+        <h2>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 16v-4M12 8h.01"/>
+                <path d="M9 9l6 6M15 9l-6 6"/>
+            </svg>
+            AI Neural Insights
+            <span style="font-size: 0.7rem; background: #191970; color: white; padding: 2px 8px; border-radius: 30px; margin-left: 8px;">LIVE</span>
+        </h2>
+        <span style="color: #78909c; font-size: 0.9rem; display: flex; align-items: center; gap: 4px;">
+            <span style="display: inline-block; width: 8px; height: 8px; background: #4caf50; border-radius: 50%; animation: pulse 2s infinite;"></span>
+            Real-time analysis
+        </span>
+    </div>
+    <div class="insights-grid">
+        <?php foreach ($insights as $insight): ?>
+        <div class="insight-card" data-type="<?php echo $insight['type']; ?>" style="border-left-color: <?php echo $insight['color']; ?>">
+            <div class="insight-icon" data-type="<?php echo $insight['type']; ?>"><?php echo $insight['icon']; ?></div>
+            <div class="insight-title"><?php echo $insight['title']; ?></div>
+            <div class="insight-message"><?php echo $insight['message']; ?></div>
+            <!-- Add small AI indicator -->
+            <div style="position: absolute; top: 10px; right: 10px; font-size: 0.6rem; color: #78909c; display: flex; align-items: center; gap: 2px;">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 8v8M8 12h8"/>
+                </svg>
+                <span>AI</span>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+</div>
                 <!-- Analytics Section -->
                 <div class="analytics-section">
                     <div class="chart-card">
