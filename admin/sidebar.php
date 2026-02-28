@@ -162,17 +162,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                             <span class="nav-count">14</span>
                         </a>
                     </li>
-                    <li class="nav-item <?php echo $current_page == 'settings.php' ? 'active' : ''; ?>">
-                        <a href="settings.php" class="nav-link">
-                            <div class="nav-icon-wrapper">
-                                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                    <circle cx="12" cy="12" r="3"/>
-                                    <path d="M19.4 15C18.9 16 18.1 16.7 17.2 17.2L19 20.6L15.8 19.5C14.9 19.9 13.9 20.1 12.8 20.1C11.7 20.1 10.7 19.9 9.8 19.5L6.6 20.6L8.4 17.2C7.5 16.7 6.7 16 6.2 15L2.8 16.8L4 13.2C3.6 12.3 3.4 11.3 3.4 10.2C3.4 9.1 3.6 8.1 4 7.2L2.8 3.6L6.2 5.4C6.7 4.5 7.5 3.8 8.4 3.3L6.6 0L9.8 1.1C10.7 0.7 11.7 0.5 12.8 0.5C13.9 0.5 14.9 0.7 15.8 1.1L19 0L17.2 3.4C18.1 3.9 18.9 4.6 19.4 5.5L22.8 3.7L21.6 7.3C22 8.2 22.2 9.2 22.2 10.3C22.2 11.4 22 12.4 21.6 13.3L22.8 16.9L19.4 15Z" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <span class="nav-label">Settings</span>
-                        </a>
-                    </li>
+                  
                 </ul>
             </div>
         </div>

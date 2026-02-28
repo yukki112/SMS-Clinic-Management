@@ -6,8 +6,8 @@ require_once 'config/database.php';
 if (isset($_SESSION['user_id'])) {
     if ($_SESSION['role'] === 'superadmin') {
         header('Location: superadmin/dashboard.php');
-    } elseif ($_SESSION['role'] === 'doctor') {
-        header('Location: doctor/dashboard.php');
+    } elseif ($_SESSION['role'] === 'nurse') {
+        header('Location: nurse/dashboard.php');
     } elseif (in_array($_SESSION['role'], ['admin', 'staff'])) {
         header('Location: admin/dashboard.php');
     }

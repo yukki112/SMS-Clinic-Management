@@ -143,7 +143,7 @@ $stats['total_users'] = count($users);
 $stats['admins'] = 0;
 $stats['superadmins'] = 0;
 $stats['staff'] = 0;
-$stats['doctors'] = 0;
+$stats['nurses'] = 0;
 
 foreach ($users as $user) {
     switch ($user['role']) {
@@ -153,8 +153,8 @@ foreach ($users as $user) {
         case 'superadmin':
             $stats['superadmins']++;
             break;
-        case 'doctor':
-            $stats['doctors']++;
+        case 'nurse':
+            $stats['nurses']++;
             break;
         default:
             $stats['staff']++;
@@ -400,7 +400,7 @@ try {
             color: #6a1b9a;
         }
 
-        .role-doctor {
+        .role-nurse {
             background: #e8f5e9;
             color: #2e7d32;
         }
@@ -547,7 +547,7 @@ try {
             color: #6a1b9a;
         }
 
-        .role-badge-table.doctor {
+        .role-badge-table.nurse {
             background: #e8f5e9;
             color: #2e7d32;
         }
@@ -885,8 +885,8 @@ try {
                     <div class="stat-card">
                         <div class="stat-icon">👩‍⚕️</div>
                         <div class="stat-info">
-                            <h3><?php echo $stats['doctors']; ?></h3>
-                            <p>Doctors</p>
+                            <h3><?php echo $stats['nurses']; ?></h3>
+                            <p>Nurses</p>
                         </div>
                     </div>
 
@@ -1013,12 +1013,12 @@ try {
 
                         <div style="background: #f8f9fa; padding: 20px; border-radius: 12px; border-left: 4px solid #2e7d32;">
                             <h3 style="color: #2e7d32; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
-                                <span>👩‍⚕️</span> Doctor
+                                <span>👩‍⚕️</span> Nurse
                             </h3>
                             <ul style="list-style: none; color: #546e7a; font-size: 0.9rem;">
                                 <li style="margin-bottom: 8px;">✓ View medical records</li>
-                                <li style="margin-bottom: 8px;">✓ Add diagnoses</li>
-                                <li style="margin-bottom: 8px;">✓ Prescribe medicine</li>
+                                <li style="margin-bottom: 8px;">✓ Record vital signs</li>
+                                <li style="margin-bottom: 8px;">✓ Dispense medicine</li>
                                 <li style="margin-bottom: 8px;">✓ Issue certificates</li>
                                 <li style="margin-bottom: 8px;">✗ Manage users</li>
                             </ul>
@@ -1079,7 +1079,7 @@ try {
                     <select name="role" class="form-control" required>
                         <option value="">Select role</option>
                         <option value="staff">Staff</option>
-                        <option value="doctor">Doctor</option>
+                        <option value="nurse">Nurse</option>
                         <?php if ($user_role == 'superadmin'): ?>
                             <option value="admin">Admin</option>
                             <option value="superadmin">Superadmin</option>
@@ -1132,7 +1132,7 @@ try {
                     <label>Role</label>
                     <select name="role" id="edit_role" class="form-control" required>
                         <option value="staff">Staff</option>
-                        <option value="doctor">Doctor</option>
+                        <option value="nurse">Nurse</option>
                         <?php if ($user_role == 'superadmin'): ?>
                             <option value="admin">Admin</option>
                             <option value="superadmin">Superadmin</option>
