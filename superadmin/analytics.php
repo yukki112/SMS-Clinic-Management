@@ -2,350 +2,118 @@
 session_start();
 require_once '../config/database.php';
 
-// Check if user is logged in and is admin
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'superadmin'])) {
+// Check if user is logged in and is admin (or superadmin)
+if (!isset($_SESSION['user_id']) || ($_SESSION['role'] !== 'admin' && $_SESSION['role'] !== 'superadmin')) {
     header('Location: ../login.php');
     exit();
 }
-
-// Include FPDF library
-require_once '../vendor/setasign/fpdf/fpdf.php';
 
 $database = new Database();
 $db = $database->getConnection();
 
 // Get filter parameters
-$report_type = isset($_REQUEST['report_type']) ? $_REQUEST['report_type'] : 'ai_insights';
-$date_from = isset($_REQUEST['date_from']) ? $_REQUEST['date_from'] : date('Y-m-d', strtotime('-30 days'));
-$date_to = isset($_REQUEST['date_to']) ? $_REQUEST['date_to'] : date('Y-m-d');
-$export_type = isset($_REQUEST['export_type']) ? $_REQUEST['export_type'] : 'full';
-$search = isset($_REQUEST['search']) ? $_REQUEST['search'] : '';
+$date_range = isset($_REQUEST['date_range']) ? $_REQUEST['date_range'] : '30days';
+$custom_date_from = isset($_REQUEST['custom_date_from']) ? $_REQUEST['custom_date_from'] : date('Y-m-d', strtotime('-30 days'));
+$custom_date_to = isset($_REQUEST['custom_date_to']) ? $_REQUEST['custom_date_to'] : date('Y-m-d');
 
-// Handle export
-if (isset($_REQUEST['export']) && $_REQUEST['export'] == 'pdf') {
-    exportToPDF($report_type, $date_from, $date_to, $export_type, $search, $db);
-    exit();
+// Set date range based on selection
+switch ($date_range) {
+    case '7days':
+        $date_from = date('Y-m-d', strtotime('-7 days'));
+        $date_to = date('Y-m-d');
+        break;
+    case '30days':
+        $date_from = date('Y-m-d', strtotime('-30 days'));
+        $date_to = date('Y-m-d');
+        break;
+    case '90days':
+        $date_from = date('Y-m-d', strtotime('-90 days'));
+        $date_to = date('Y-m-d');
+        break;
+    case 'year':
+        $date_from = date('Y-m-d', strtotime('-1 year'));
+        $date_to = date('Y-m-d');
+        break;
+    case 'custom':
+        $date_from = $custom_date_from;
+        $date_to = $custom_date_to;
+        break;
+    default:
+        $date_from = date('Y-m-d', strtotime('-30 days'));
+        $date_to = date('Y-m-d');
 }
-
-// AI Functions
-function getAIPredictions($db, $date_from, $date_to) {
-    $predictions = [];
-    
-    // Predict next month's visits based on historical data
-    $query = "SELECT 
-                DAYOFWEEK(visit_date) as day_of_week,
-                COUNT(*) as avg_visits
-              FROM visit_history 
-              WHERE visit_date BETWEEN :date_from AND :date_to
-              GROUP BY DAYOFWEEK(visit_date)
-              ORDER BY day_of_week";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':date_from', $date_from);
-    $stmt->bindParam(':date_to', $date_to);
-    $stmt->execute();
-    $daily_pattern = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Calculate average daily visits
-    $total_visits = 0;
-    $days_count = 0;
-    foreach ($daily_pattern as $day) {
-        $total_visits += $day['avg_visits'];
-        $days_count++;
-    }
-    $avg_daily = $days_count > 0 ? round($total_visits / $days_count) : 0;
-    
-    // Predict next 30 days
-    $predictions['next_month_visits'] = $avg_daily * 30;
-    
-    // Predict stock depletion
-    $query = "SELECT 
-                item_name,
-                quantity,
-                (SELECT COALESCE(AVG(quantity), 1) 
-                 FROM dispensing_log 
-                 WHERE item_code = cs.item_code 
-                 AND dispensed_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)) as avg_monthly_usage
-              FROM clinic_stock cs
-              WHERE quantity > 0";
-    $stmt = $db->query($query);
-    $stock_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    $stock_predictions = [];
-    foreach ($stock_items as $item) {
-        if ($item['avg_monthly_usage'] > 0) {
-            $months_until_depletion = $item['quantity'] / $item['avg_monthly_usage'];
-            if ($months_until_depletion <= 1) {
-                $stock_predictions[] = [
-                    'item' => $item['item_name'],
-                    'months_left' => round($months_until_depletion, 1),
-                    'status' => 'critical'
-                ];
-            } elseif ($months_until_depletion <= 2) {
-                $stock_predictions[] = [
-                    'item' => $item['item_name'],
-                    'months_left' => round($months_until_depletion, 1),
-                    'status' => 'warning'
-                ];
-            }
-        }
-    }
-    $predictions['stock_alerts'] = $stock_predictions;
-    
-    // Predict busy periods
-    $query = "SELECT 
-                HOUR(visit_time) as hour,
-                COUNT(*) as visit_count
-              FROM visit_history 
-              WHERE visit_date BETWEEN :date_from AND :date_to
-              GROUP BY HOUR(visit_time)
-              ORDER BY visit_count DESC
-              LIMIT 3";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':date_from', $date_from);
-    $stmt->bindParam(':date_to', $date_to);
-    $stmt->execute();
-    $peak_hours = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    $predictions['peak_hours'] = $peak_hours;
-    
-    // Predict common complaints trend
-    $query = "SELECT 
-                complaint,
-                COUNT(*) as frequency,
-                COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as percentage
-              FROM visit_history 
-              WHERE visit_date BETWEEN :date_from AND :date_to
-              GROUP BY complaint
-              ORDER BY frequency DESC
-              LIMIT 5";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':date_from', $date_from);
-    $stmt->bindParam(':date_to', $date_to);
-    $stmt->execute();
-    $common_complaints = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    $predictions['common_complaints'] = $common_complaints;
-    
-    return $predictions;
-}
-
-function getAnomalyDetection($db, $date_from, $date_to) {
-    $anomalies = [];
-    
-    // Detect unusual spike in incidents
-    $query = "SELECT 
-                DATE(incident_date) as date,
-                COUNT(*) as daily_count,
-                (SELECT AVG(cnt) FROM (
-                    SELECT DATE(incident_date) as d, COUNT(*) as cnt
-                    FROM incidents 
-                    WHERE incident_date BETWEEN DATE_SUB(:date_to, INTERVAL 30 DAY) AND :date_to
-                    GROUP BY DATE(incident_date)
-                ) as avg_table) as avg_count
-              FROM incidents 
-              WHERE incident_date BETWEEN :date_from AND :date_to
-              GROUP BY DATE(incident_date)
-              HAVING daily_count > avg_count * 2";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':date_from', $date_from);
-    $stmt->bindParam(':date_to', $date_to);
-    $stmt->execute();
-    $incident_spikes = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    if (!empty($incident_spikes)) {
-        $anomalies['incident_spikes'] = $incident_spikes;
-    }
-    
-    // Detect unusual medicine usage
-    $query = "SELECT 
-                item_name,
-                SUM(quantity) as total_used,
-                (SELECT AVG(monthly_usage) FROM (
-                    SELECT DATE_FORMAT(dispensed_date, '%Y-%m') as month, SUM(quantity) as monthly_usage
-                    FROM dispensing_log 
-                    WHERE dispensed_date >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
-                    GROUP BY DATE_FORMAT(dispensed_date, '%Y-%m')
-                ) as avg_usage) as avg_monthly
-              FROM dispensing_log 
-              WHERE dispensed_date BETWEEN :date_from AND :date_to
-              GROUP BY item_name
-              HAVING total_used > avg_monthly * 1.5";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':date_from', $date_from);
-    $stmt->bindParam(':date_to', $date_to);
-    $stmt->execute();
-    $usage_anomalies = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    if (!empty($usage_anomalies)) {
-        $anomalies['usage_spikes'] = $usage_anomalies;
-    }
-    
-    return $anomalies;
-}
-
-function getSmartRecommendations($db, $date_from, $date_to) {
-    $recommendations = [];
-    
-    // Stock level recommendations
-    $query = "SELECT 
-                item_name,
-                quantity,
-                minimum_stock,
-                expiry_date,
-                DATEDIFF(expiry_date, CURDATE()) as days_to_expiry
-              FROM clinic_stock 
-              WHERE quantity <= minimum_stock * 1.5 
-                 OR expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-              ORDER BY 
-                CASE 
-                    WHEN quantity <= minimum_stock THEN 1
-                    WHEN expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY) THEN 2
-                    ELSE 3
-                END";
-    $stmt = $db->query($query);
-    $stock_needs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    foreach ($stock_needs as $item) {
-        if ($item['quantity'] <= $item['minimum_stock']) {
-            $recommendations[] = [
-                'type' => 'restock',
-                'priority' => 'high',
-                'message' => "Restock {$item['item_name']} - Current: {$item['quantity']}, Minimum: {$item['minimum_stock']}"
-            ];
-        } elseif ($item['days_to_expiry'] <= 30 && $item['days_to_expiry'] > 0) {
-            $recommendations[] = [
-                'type' => 'expiry',
-                'priority' => 'medium',
-                'message' => "{$item['item_name']} expires in {$item['days_to_expiry']} days"
-            ];
-        }
-    }
-    
-    // Staff allocation recommendations based on peak hours
-    $query = "SELECT 
-                HOUR(visit_time) as hour,
-                COUNT(*) as visit_count,
-                DAYNAME(visit_date) as day_name
-              FROM visit_history 
-              WHERE visit_date BETWEEN :date_from AND :date_to
-              GROUP BY HOUR(visit_time), DAYNAME(visit_date)
-              HAVING visit_count > (
-                SELECT AVG(cnt) FROM (
-                  SELECT COUNT(*) as cnt
-                  FROM visit_history 
-                  WHERE visit_date BETWEEN :date_from AND :date_to
-                  GROUP BY HOUR(visit_time), DATE(visit_date)
-                ) as avg_visits
-              )
-              ORDER BY visit_count DESC
-              LIMIT 5";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':date_from', $date_from);
-    $stmt->bindParam(':date_to', $date_to);
-    $stmt->execute();
-    $peak_times = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    if (!empty($peak_times)) {
-        $peak = $peak_times[0];
-        $recommendations[] = [
-            'type' => 'staffing',
-            'priority' => 'medium',
-            'message' => "Consider additional staff on {$peak['day_name']}s around " . date('g A', strtotime($peak['hour'] . ':00'))
-        ];
-    }
-    
-    // Preventive measures based on common complaints
-    $query = "SELECT 
-                complaint,
-                COUNT(*) as frequency
-              FROM visit_history 
-              WHERE visit_date BETWEEN :date_from AND :date_to
-              GROUP BY complaint
-              ORDER BY frequency DESC
-              LIMIT 1";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':date_from', $date_from);
-    $stmt->bindParam(':date_to', $date_to);
-    $stmt->execute();
-    $top_complaint = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    if ($top_complaint && $top_complaint['frequency'] > 10) {
-        $recommendations[] = [
-            'type' => 'prevention',
-            'priority' => 'low',
-            'message' => "High frequency of '{$top_complaint['complaint']}' cases. Consider preventive measures or awareness campaign"
-        ];
-    }
-    
-    return $recommendations;
-}
-
-// Get AI data
-$ai_predictions = getAIPredictions($db, $date_from, $date_to);
-$anomalies = getAnomalyDetection($db, $date_from, $date_to);
-$recommendations = getSmartRecommendations($db, $date_from, $date_to);
 
 // Get chart data
 $chart_data = [];
 
-// Incident types chart
-$query = "SELECT incident_type, COUNT(*) as count FROM incidents WHERE incident_date BETWEEN :date_from AND :date_to GROUP BY incident_type";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':date_from', $date_from);
-$stmt->bindParam(':date_to', $date_to);
-$stmt->execute();
-$incident_chart = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$chart_data['incident_types'] = $incident_chart;
-
-// Clearance status chart
-$query = "SELECT status, COUNT(*) as count FROM clearance_requests WHERE request_date BETWEEN :date_from AND :date_to GROUP BY status";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':date_from', $date_from);
-$stmt->bindParam(':date_to', $date_to);
-$stmt->execute();
-$clearance_chart = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$chart_data['clearance_status'] = $clearance_chart;
-
-// Medicine request status chart
-$query = "SELECT status, COUNT(*) as count FROM medicine_requests WHERE DATE(requested_date) BETWEEN :date_from AND :date_to GROUP BY status";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':date_from', $date_from);
-$stmt->bindParam(':date_to', $date_to);
-$stmt->execute();
-$request_chart = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$chart_data['request_status'] = $request_chart;
-
-// Daily activity for last 7 days
-$last_7_days = date('Y-m-d', strtotime('-7 days', strtotime($date_to)));
+// 1. Visit Trends (Last 30 days)
 $query = "SELECT 
             DATE(visit_date) as date,
             COUNT(*) as count 
           FROM visit_history 
-          WHERE visit_date BETWEEN :last_7_days AND :date_to 
+          WHERE visit_date BETWEEN :date_from AND :date_to 
           GROUP BY DATE(visit_date) 
           ORDER BY date ASC";
 $stmt = $db->prepare($query);
-$stmt->bindParam(':last_7_days', $last_7_days);
+$stmt->bindParam(':date_from', $date_from);
 $stmt->bindParam(':date_to', $date_to);
 $stmt->execute();
-$daily_visits = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$chart_data['daily_visits'] = $daily_visits;
+$visit_trends = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['visit_trends'] = $visit_trends;
 
-// Monthly trend
-$query = "SELECT 
-            DATE_FORMAT(visit_date, '%Y-%m') as month,
-            COUNT(*) as count 
-          FROM visit_history 
-          WHERE visit_date BETWEEN DATE_SUB(:date_to, INTERVAL 6 MONTH) AND :date_to
-          GROUP BY DATE_FORMAT(visit_date, '%Y-%m')
-          ORDER BY month ASC";
+// 2. Incident Types Distribution
+$query = "SELECT incident_type, COUNT(*) as count 
+          FROM incidents 
+          WHERE incident_date BETWEEN :date_from AND :date_to 
+          GROUP BY incident_type";
 $stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
 $stmt->bindParam(':date_to', $date_to);
 $stmt->execute();
-$monthly_trend = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$chart_data['monthly_trend'] = $monthly_trend;
+$incident_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['incident_types'] = $incident_types;
 
-// Stock status
+// 3. Clearance Status Distribution
+$query = "SELECT status, COUNT(*) as count 
+          FROM clearance_requests 
+          WHERE request_date BETWEEN :date_from AND :date_to 
+          GROUP BY status";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$clearance_status = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['clearance_status'] = $clearance_status;
+
+// 4. Medicine Request Status
+$query = "SELECT status, COUNT(*) as count 
+          FROM medicine_requests 
+          WHERE DATE(requested_date) BETWEEN :date_from AND :date_to 
+          GROUP BY status";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$request_status = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['request_status'] = $request_status;
+
+// 5. Top 5 Most Common Complaints
+$query = "SELECT complaint, COUNT(*) as count 
+          FROM visit_history 
+          WHERE visit_date BETWEEN :date_from AND :date_to 
+          AND complaint IS NOT NULL 
+          AND complaint != ''
+          GROUP BY complaint 
+          ORDER BY count DESC 
+          LIMIT 5";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$top_complaints = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['top_complaints'] = $top_complaints;
+
+// 6. Stock Status
 $query = "SELECT 
             CASE 
                 WHEN quantity <= minimum_stock THEN 'Low Stock'
@@ -356,13 +124,485 @@ $query = "SELECT
           FROM clinic_stock 
           GROUP BY status";
 $stmt = $db->query($query);
-$stock_chart = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$chart_data['stock_status'] = $stock_chart;
+$stock_status = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['stock_status'] = $stock_status;
 
-// Get preview data
-$preview_data = getReportData($report_type, $date_from, $date_to, 'full', $search, $db);
-$preview_count = count($preview_data);
-$preview_data = array_slice($preview_data, 0, 10);
+// 7. Physical Exam Fit Status
+$query = "SELECT fit_for_school, COUNT(*) as count 
+          FROM physical_exam_records 
+          WHERE exam_date BETWEEN :date_from AND :date_to 
+          GROUP BY fit_for_school";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$fit_status = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['fit_status'] = $fit_status;
+
+// 8. Top 5 Most Dispensed Items
+$query = "SELECT item_name, SUM(quantity) as total_quantity 
+          FROM dispensing_log 
+          WHERE DATE(dispensed_date) BETWEEN :date_from AND :date_to 
+          GROUP BY item_name 
+          ORDER BY total_quantity DESC 
+          LIMIT 5";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$top_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['top_items'] = $top_items;
+
+// 9. Grade Level Distribution for Visits
+$query = "SELECT 
+            LEFT(grade_section, LOCATE(' - ', grade_section) - 1) as grade_level,
+            COUNT(*) as count 
+          FROM visit_history 
+          WHERE visit_date BETWEEN :date_from AND :date_to 
+          AND grade_section IS NOT NULL 
+          GROUP BY grade_level 
+          ORDER BY count DESC";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$grade_distribution = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['grade_distribution'] = $grade_distribution;
+
+// 10. Clearance Types Distribution
+$query = "SELECT clearance_type, COUNT(*) as count 
+          FROM clearance_requests 
+          WHERE request_date BETWEEN :date_from AND :date_to 
+          GROUP BY clearance_type";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$clearance_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$chart_data['clearance_types'] = $clearance_types;
+
+// Get key metrics for stats cards
+$stats = [];
+
+// Total visits
+$query = "SELECT COUNT(*) as total FROM visit_history WHERE visit_date BETWEEN :date_from AND :date_to";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$stats['total_visits'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Total incidents
+$query = "SELECT COUNT(*) as total FROM incidents WHERE incident_date BETWEEN :date_from AND :date_to";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$stats['total_incidents'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Total clearance requests
+$query = "SELECT COUNT(*) as total FROM clearance_requests WHERE request_date BETWEEN :date_from AND :date_to";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$stats['total_clearance'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Total medicine requests
+$query = "SELECT COUNT(*) as total FROM medicine_requests WHERE DATE(requested_date) BETWEEN :date_from AND :date_to";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$stats['total_requests'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Total items dispensed
+$query = "SELECT SUM(quantity) as total FROM dispensing_log WHERE DATE(dispensed_date) BETWEEN :date_from AND :date_to";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$stats['total_dispensed'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0;
+
+// Low stock count
+$query = "SELECT COUNT(*) as total FROM clinic_stock WHERE quantity <= minimum_stock";
+$stmt = $db->query($query);
+$stats['low_stock'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Expiring soon (next 30 days)
+$expiry_threshold = date('Y-m-d', strtotime('+30 days'));
+$query = "SELECT COUNT(*) as total FROM clinic_stock WHERE expiry_date <= :threshold AND expiry_date >= CURDATE()";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':threshold', $expiry_threshold);
+$stmt->execute();
+$stats['expiring_soon'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Pending clearance requests
+$query = "SELECT COUNT(*) as total FROM clearance_requests WHERE status = 'Pending'";
+$stmt = $db->query($query);
+$stats['pending_clearance'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Pending medicine requests
+$query = "SELECT COUNT(*) as total FROM medicine_requests WHERE status = 'pending'";
+$stmt = $db->query($query);
+$stats['pending_requests'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// 11. Emergency Cases
+$query = "SELECT COUNT(*) as total FROM emergency_cases WHERE DATE(created_at) BETWEEN :date_from AND :date_to";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$stats['total_emergency'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// 12. Physical Exams
+$query = "SELECT COUNT(*) as total FROM physical_exam_records WHERE exam_date BETWEEN :date_from AND :date_to";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$stats['total_exams'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// 13. Medical Certificates
+$query = "SELECT COUNT(*) as total FROM medical_certificates WHERE issued_date BETWEEN :date_from AND :date_to";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$stats['total_certificates'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Calculate percentage changes (compare with previous period)
+$previous_date_from = date('Y-m-d', strtotime($date_from . ' -' . (strtotime($date_to) - strtotime($date_from)) / (60*60*24) . ' days'));
+$previous_date_to = date('Y-m-d', strtotime($date_from . ' -1 day'));
+
+// Previous period visits
+$query = "SELECT COUNT(*) as total FROM visit_history WHERE visit_date BETWEEN :date_from AND :date_to";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $previous_date_from);
+$stmt->bindParam(':date_to', $previous_date_to);
+$stmt->execute();
+$previous_visits = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+$stats['visits_change'] = $previous_visits > 0 ? round((($stats['total_visits'] - $previous_visits) / $previous_visits) * 100, 1) : 0;
+
+// Previous period incidents
+$query = "SELECT COUNT(*) as total FROM incidents WHERE incident_date BETWEEN :date_from AND :date_to";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $previous_date_from);
+$stmt->bindParam(':date_to', $previous_date_to);
+$stmt->execute();
+$previous_incidents = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+$stats['incidents_change'] = $previous_incidents > 0 ? round((($stats['total_incidents'] - $previous_incidents) / $previous_incidents) * 100, 1) : 0;
+
+// AI Analytics Functions
+
+// Function to generate AI insights based on data
+function generateAIInsights($chart_data, $stats, $date_from, $date_to, $db) {
+    $insights = [];
+    
+    // Insight 1: Peak activity times
+    $query = "SELECT 
+                HOUR(visit_time) as hour,
+                COUNT(*) as count 
+              FROM visit_history 
+              WHERE visit_date BETWEEN :date_from AND :date_to 
+              GROUP BY HOUR(visit_time) 
+              ORDER BY count DESC 
+              LIMIT 1";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':date_from', $date_from);
+    $stmt->bindParam(':date_to', $date_to);
+    $stmt->execute();
+    $peak_hour = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($peak_hour && $peak_hour['count'] > 0) {
+        $hour = $peak_hour['hour'];
+        $period = $hour < 12 ? 'morning' : ($hour < 17 ? 'afternoon' : 'evening');
+        $formatted_hour = $hour . ':00 - ' . ($hour + 1) . ':00';
+        $insights[] = [
+            'type' => 'positive',
+            'title' => 'Peak Clinic Hours',
+            'message' => "Most visits occur between {$formatted_hour} ({$period}). Consider scheduling additional staff during this time.",
+            'icon' => '🕐'
+        ];
+    }
+    
+    // Insight 2: Low stock alert
+    if ($stats['low_stock'] > 0) {
+        $insights[] = [
+            'type' => 'warning',
+            'title' => 'Low Stock Alert',
+            'message' => "You have {$stats['low_stock']} item(s) with low stock levels. Please reorder soon.",
+            'icon' => '⚠️'
+        ];
+    }
+    
+    // Insight 3: Expiring items
+    if ($stats['expiring_soon'] > 0) {
+        $insights[] = [
+            'type' => 'warning',
+            'title' => 'Expiring Items',
+            'message' => "{$stats['expiring_soon']} item(s) will expire within the next 30 days. Plan for usage or disposal.",
+            'icon' => '📅'
+        ];
+    }
+    
+    // Insight 4: Pending requests
+    if ($stats['pending_requests'] > 0) {
+        $insights[] = [
+            'type' => 'info',
+            'title' => 'Pending Medicine Requests',
+            'message' => "You have {$stats['pending_requests']} pending medicine request(s) awaiting approval.",
+            'icon' => '💊'
+        ];
+    }
+    
+    // Insight 5: Pending clearances
+    if ($stats['pending_clearance'] > 0) {
+        $insights[] = [
+            'type' => 'info',
+            'title' => 'Pending Clearance Requests',
+            'message' => "There are {$stats['pending_clearance']} clearance request(s) pending review.",
+            'icon' => '📋'
+        ];
+    }
+    
+    // Insight 6: Most common complaint
+    if (!empty($chart_data['top_complaints'])) {
+        $top = $chart_data['top_complaints'][0];
+        $insights[] = [
+            'type' => 'neutral',
+            'title' => 'Most Common Complaint',
+            'message' => "'{$top['complaint']}' is the most frequent complaint with {$top['count']} cases in this period.",
+            'icon' => '🔍'
+        ];
+    }
+    
+    // Insight 7: Visit trend analysis
+    if (!empty($chart_data['visit_trends']) && count($chart_data['visit_trends']) >= 7) {
+        $recent = array_slice($chart_data['visit_trends'], -7);
+        $avg_recent = array_sum(array_column($recent, 'count')) / 7;
+        $older = array_slice($chart_data['visit_trends'], 0, 7);
+        $avg_older = array_sum(array_column($older, 'count')) / 7;
+        
+        $trend = $avg_recent > $avg_older ? 'increasing' : ($avg_recent < $avg_older ? 'decreasing' : 'stable');
+        $percent_change = $avg_older > 0 ? round((($avg_recent - $avg_older) / $avg_older) * 100, 1) : 0;
+        
+        if ($trend == 'increasing' && $percent_change > 10) {
+            $insights[] = [
+                'type' => 'trend_up',
+                'title' => 'Increasing Visit Trend',
+                'message' => "Clinic visits are up by {$percent_change}% compared to the previous week.",
+                'icon' => '📈'
+            ];
+        } elseif ($trend == 'decreasing' && $percent_change < -10) {
+            $insights[] = [
+                'type' => 'trend_down',
+                'title' => 'Decreasing Visit Trend',
+                'message' => "Clinic visits have decreased by " . abs($percent_change) . "% compared to the previous week.",
+                'icon' => '📉'
+            ];
+        }
+    }
+    
+    // Insight 8: Incident type focus
+    if (!empty($chart_data['incident_types'])) {
+        $max_incident = null;
+        $max_count = 0;
+        foreach ($chart_data['incident_types'] as $type) {
+            if ($type['count'] > $max_count) {
+                $max_count = $type['count'];
+                $max_incident = $type['incident_type'];
+            }
+        }
+        if ($max_incident) {
+            $insights[] = [
+                'type' => 'neutral',
+                'title' => 'Most Common Incident Type',
+                'message' => "'{$max_incident}' accounts for the majority of incidents ({$max_count} cases).",
+                'icon' => '🚨'
+            ];
+        }
+    }
+    
+    // Insight 9: Grade level with most visits
+    if (!empty($chart_data['grade_distribution'])) {
+        $top_grade = $chart_data['grade_distribution'][0];
+        $insights[] = [
+            'type' => 'neutral',
+            'title' => 'Most Active Grade Level',
+            'message' => "Grade {$top_grade['grade_level']} has the most clinic visits with {$top_grade['count']} visits.",
+            'icon' => '🎓'
+        ];
+    }
+    
+    // Insight 10: Clearance type analysis
+    if (!empty($chart_data['clearance_types'])) {
+        $max_clearance = null;
+        $max_count = 0;
+        foreach ($chart_data['clearance_types'] as $type) {
+            if ($type['count'] > $max_count) {
+                $max_count = $type['count'];
+                $max_clearance = $type['clearance_type'];
+            }
+        }
+        if ($max_clearance) {
+            $insights[] = [
+                'type' => 'neutral',
+                'title' => 'Most Requested Clearance',
+                'message' => "'{$max_clearance}' is the most requested clearance type with {$max_count} requests.",
+                'icon' => '✅'
+            ];
+        }
+    }
+    
+    // Insight 11: Most dispensed item
+    if (!empty($chart_data['top_items'])) {
+        $top_item = $chart_data['top_items'][0];
+        $insights[] = [
+            'type' => 'neutral',
+            'title' => 'Most Used Item',
+            'message' => "'{$top_item['item_name']}' is the most dispensed item ({$top_item['total_quantity']} units).",
+            'icon' => '💊'
+        ];
+    }
+    
+    // Insight 12: Emergency cases percentage
+    if ($stats['total_incidents'] > 0) {
+        $emergency_percent = round(($stats['total_emergency'] / $stats['total_incidents']) * 100, 1);
+        if ($emergency_percent > 20) {
+            $insights[] = [
+                'type' => 'warning',
+                'title' => 'High Emergency Rate',
+                'message' => "Emergency cases make up {$emergency_percent}% of all incidents. Review safety protocols.",
+                'icon' => '🚑'
+            ];
+        }
+    }
+    
+    // Insight 13: Fit status analysis
+    if (!empty($chart_data['fit_status'])) {
+        $not_fit = 0;
+        $total = 0;
+        foreach ($chart_data['fit_status'] as $status) {
+            $total += $status['count'];
+            if ($status['fit_for_school'] == 'No' || $status['fit_for_school'] == 'With Restrictions') {
+                $not_fit += $status['count'];
+            }
+        }
+        if ($total > 0) {
+            $not_fit_percent = round(($not_fit / $total) * 100, 1);
+            if ($not_fit_percent > 15) {
+                $insights[] = [
+                    'type' => 'info',
+                    'title' => 'Health Restrictions',
+                    'message' => "{$not_fit_percent}% of students have health restrictions or are not fit for school activities.",
+                    'icon' => '🏥'
+                ];
+            }
+        }
+    }
+    
+    // Insight 14: Weekend vs weekday comparison
+    $query = "SELECT 
+                CASE 
+                    WHEN DAYOFWEEK(visit_date) IN (1,7) THEN 'Weekend'
+                    ELSE 'Weekday'
+                END as day_type,
+                COUNT(*) as count 
+              FROM visit_history 
+              WHERE visit_date BETWEEN :date_from AND :date_to 
+              GROUP BY day_type";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':date_from', $date_from);
+    $stmt->bindParam(':date_to', $date_to);
+    $stmt->execute();
+    $day_types = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $weekday_count = 0;
+    $weekend_count = 0;
+    foreach ($day_types as $day) {
+        if ($day['day_type'] == 'Weekday') {
+            $weekday_count = $day['count'];
+        } else {
+            $weekend_count = $day['count'];
+        }
+    }
+    
+    if ($weekend_count > ($weekday_count * 0.3)) { // More than 30% of weekday traffic on weekends
+        $insights[] = [
+            'type' => 'info',
+            'title' => 'Weekend Activity',
+            'message' => "Significant clinic activity occurs on weekends. Consider weekend staffing adjustments.",
+            'icon' => '📆'
+        ];
+    }
+    
+    // Insight 15: Clearance approval rate
+    if ($stats['total_clearance'] > 0) {
+        $approved = 0;
+        foreach ($chart_data['clearance_status'] as $status) {
+            if ($status['status'] == 'Approved') {
+                $approved = $status['count'];
+            }
+        }
+        $approval_rate = round(($approved / $stats['total_clearance']) * 100, 1);
+        if ($approval_rate < 50) {
+            $insights[] = [
+                'type' => 'warning',
+                'title' => 'Low Clearance Approval Rate',
+                'message' => "Only {$approval_rate}% of clearance requests are approved. Review rejection reasons.",
+                'icon' => '❌'
+            ];
+        }
+    }
+    
+    // Limit to top 8 insights (to avoid overwhelming)
+    return array_slice($insights, 0, 8);
+}
+
+// Generate AI insights
+$ai_insights = generateAIInsights($chart_data, $stats, $date_from, $date_to, $db);
+
+// Get recent activity for the table
+$query = "SELECT 
+            'Visit' as type,
+            vh.student_id as student_id,
+            vh.student_name as student_name,
+            vh.visit_date as date,
+            vh.complaint as description,
+            u.full_name as attended_by
+          FROM visit_history vh
+          LEFT JOIN users u ON vh.attended_by = u.id
+          WHERE vh.visit_date BETWEEN :date_from AND :date_to
+          UNION ALL
+          SELECT 
+            'Incident' as type,
+            i.student_id,
+            i.student_name,
+            i.incident_date,
+            i.description,
+            i.reporter_name
+          FROM incidents i
+          WHERE i.incident_date BETWEEN :date_from AND :date_to
+          UNION ALL
+          SELECT 
+            'Clearance' as type,
+            cr.student_id,
+            cr.student_name,
+            cr.request_date,
+            cr.purpose,
+            cr.approved_by
+          FROM clearance_requests cr
+          WHERE cr.request_date BETWEEN :date_from AND :date_to
+          ORDER BY date DESC
+          LIMIT 10";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':date_from', $date_from);
+$stmt->bindParam(':date_to', $date_to);
+$stmt->execute();
+$recent_activity = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -465,15 +705,15 @@ $preview_data = array_slice($preview_data, 0, 10);
         box-shadow: 0 8px 16px rgba(25, 25, 112, 0.2);
     }
 
-    .btn-success {
-        background: #2e7d32;
-        color: white;
+    .btn-outline {
+        background: transparent;
+        color: #191970;
+        border: 1px solid #191970;
     }
 
-    .btn-success:hover {
-        background: #3a8e3f;
+    .btn-outline:hover {
+        background: rgba(25, 25, 112, 0.05);
         transform: translateY(-2px);
-        box-shadow: 0 8px 16px rgba(46, 125, 50, 0.2);
     }
 
     .btn-secondary {
@@ -485,17 +725,6 @@ $preview_data = array_slice($preview_data, 0, 10);
     .btn-secondary:hover {
         background: #cfd8dc;
         transform: translateY(-2px);
-    }
-
-    .btn-info {
-        background: #0288d1;
-        color: white;
-    }
-
-    .btn-info:hover {
-        background: #039be5;
-        transform: translateY(-2px);
-        box-shadow: 0 8px 16px rgba(2, 136, 209, 0.2);
     }
 
     /* Filter Section */
@@ -552,254 +781,112 @@ $preview_data = array_slice($preview_data, 0, 10);
         box-shadow: 0 4px 12px rgba(25, 25, 112, 0.1);
     }
 
-    .export-options {
-        display: flex;
-        gap: 24px;
-        margin: 20px 0;
-        padding: 16px;
-        background: #f8fafc;
-        border-radius: 12px;
-    }
-
-    .export-option {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-
-    .export-option input[type="radio"] {
-        accent-color: #191970;
-        width: 16px;
-        height: 16px;
-    }
-
     .filter-actions {
         display: flex;
         gap: 12px;
         justify-content: flex-end;
+        margin-top: 20px;
     }
 
     /* AI Insights Section */
-    .ai-section {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 20px;
-        padding: 30px;
+    .ai-insights {
+        background: linear-gradient(135deg, #191970 0%, #24248f 100%);
+        border-radius: 16px;
+        padding: 24px;
         margin-bottom: 30px;
         color: white;
-        animation: fadeInUp 0.5s ease;
-        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        animation: fadeInUp 0.7s ease;
+        box-shadow: 0 8px 24px rgba(25, 25, 112, 0.3);
     }
 
     .ai-header {
         display: flex;
         align-items: center;
         gap: 12px;
-        margin-bottom: 24px;
-    }
-
-    .ai-header h2 {
-        font-size: 1.8rem;
-        font-weight: 700;
-    }
-
-    .ai-header i {
-        font-size: 2rem;
-        background: rgba(255, 255, 255, 0.2);
-        padding: 12px;
-        border-radius: 12px;
-    }
-
-    .ai-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 24px;
-    }
-
-    .ai-card {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 16px;
-        padding: 24px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-    }
-
-    .ai-card h3 {
-        font-size: 1rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 16px;
-        opacity: 0.9;
-    }
-
-    .ai-card .value {
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin-bottom: 8px;
-    }
-
-    .ai-card .label {
-        font-size: 0.9rem;
-        opacity: 0.8;
-    }
-
-    .ai-card .trend {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        margin-top: 12px;
-        font-size: 0.9rem;
-    }
-
-    .trend.up { color: #4caf50; }
-    .trend.down { color: #f44336; }
-
-    /* Anomaly Alert */
-    .anomaly-alert {
-        background: rgba(244, 67, 54, 0.1);
-        border-left: 4px solid #f44336;
-        padding: 16px 20px;
-        margin-bottom: 30px;
-        border-radius: 12px;
-        animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-        0% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4); }
-        70% { box-shadow: 0 0 0 10px rgba(244, 67, 54, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0); }
-    }
-
-    /* Recommendations */
-    .recommendations-section {
-        background: white;
-        border-radius: 16px;
-        padding: 24px;
-        margin-bottom: 30px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        border: 1px solid #cfd8dc;
-    }
-
-    .recommendations-header {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 24px;
-    }
-
-    .recommendations-header h2 {
-        font-size: 1.2rem;
-        font-weight: 600;
-        color: #191970;
-    }
-
-    .recommendations-grid {
-        display: grid;
-        gap: 16px;
-    }
-
-    .recommendation-item {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        padding: 16px;
-        background: #f8fafc;
-        border-radius: 12px;
-        border-left: 4px solid;
-        transition: all 0.3s ease;
-    }
-
-    .recommendation-item:hover {
-        transform: translateX(4px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    }
-
-    .recommendation-item.priority-high { border-left-color: #f44336; }
-    .recommendation-item.priority-medium { border-left-color: #ff9800; }
-    .recommendation-item.priority-low { border-left-color: #4caf50; }
-
-    .recommendation-icon {
-        width: 40px;
-        height: 40px;
-        border-radius: 10px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 20px;
-    }
-
-    .recommendation-content {
-        flex: 1;
-    }
-
-    .recommendation-title {
-        font-weight: 600;
-        color: #191970;
-        margin-bottom: 4px;
-    }
-
-    .recommendation-message {
-        color: #546e7a;
-        font-size: 0.9rem;
-    }
-
-    .recommendation-badge {
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        font-weight: 600;
-        text-transform: uppercase;
-    }
-
-    .badge-high {
-        background: #ffebee;
-        color: #f44336;
-    }
-
-    .badge-medium {
-        background: #fff3e0;
-        color: #ff9800;
-    }
-
-    .badge-low {
-        background: #e8f5e9;
-        color: #4caf50;
-    }
-
-    /* Charts Grid */
-    .charts-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 24px;
-        margin-bottom: 30px;
-        animation: fadeInUp 0.7s ease;
-    }
-
-    .chart-card {
-        background: white;
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        border: 1px solid #cfd8dc;
-    }
-
-    .chart-card h3 {
-        font-size: 1rem;
-        font-weight: 600;
-        color: #191970;
         margin-bottom: 20px;
     }
 
-    .chart-container {
-        height: 250px;
-        position: relative;
+    .ai-header h2 {
+        font-size: 1.3rem;
+        font-weight: 600;
+    }
+
+    .ai-header .badge {
+        background: rgba(255, 255, 255, 0.2);
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 500;
+    }
+
+    .insights-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+    }
+
+    .insight-card {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 12px;
+        padding: 16px;
+        transition: all 0.3s ease;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .insight-card:hover {
+        transform: translateY(-4px);
+        background: rgba(255, 255, 255, 0.15);
+    }
+
+    .insight-icon {
+        font-size: 24px;
+        margin-bottom: 12px;
+    }
+
+    .insight-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+        opacity: 0.9;
+    }
+
+    .insight-message {
+        font-size: 0.8rem;
+        line-height: 1.4;
+        opacity: 0.8;
+    }
+
+    .insight-card.warning {
+        background: rgba(255, 152, 0, 0.2);
+        border-left: 3px solid #ff9800;
+    }
+
+    .insight-card.positive {
+        background: rgba(76, 175, 80, 0.2);
+        border-left: 3px solid #4caf50;
+    }
+
+    .insight-card.info {
+        background: rgba(33, 150, 243, 0.2);
+        border-left: 3px solid #2196f3;
+    }
+
+    .insight-card.trend_up {
+        background: rgba(76, 175, 80, 0.2);
+        border-left: 3px solid #4caf50;
+    }
+
+    .insight-card.trend_down {
+        background: rgba(244, 67, 54, 0.2);
+        border-left: 3px solid #f44336;
     }
 
     /* Stats Grid */
     .stats-grid {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
-        gap: 24px;
+        gap: 20px;
         margin-bottom: 30px;
         animation: fadeInUp 0.8s ease;
     }
@@ -807,7 +894,7 @@ $preview_data = array_slice($preview_data, 0, 10);
     .stat-card {
         background: white;
         border-radius: 16px;
-        padding: 24px;
+        padding: 20px;
         display: flex;
         align-items: center;
         gap: 16px;
@@ -853,22 +940,76 @@ $preview_data = array_slice($preview_data, 0, 10);
         letter-spacing: 0.5px;
     }
 
-    /* Preview Table */
-    .preview-section {
+    .stat-trend {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.8rem;
+        margin-top: 4px;
+    }
+
+    .trend-up {
+        color: #4caf50;
+    }
+
+    .trend-down {
+        color: #f44336;
+    }
+
+    /* Charts Grid */
+    .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 24px;
+        margin-bottom: 30px;
+        animation: fadeInUp 0.9s ease;
+    }
+
+    .chart-card {
+        background: white;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 1px solid #cfd8dc;
+    }
+
+    .chart-card h3 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #191970;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .chart-card h3 span {
+        font-size: 0.8rem;
+        font-weight: 400;
+        color: #78909c;
+    }
+
+    .chart-container {
+        height: 250px;
+        position: relative;
+    }
+
+    /* Recent Activity */
+    .recent-activity {
         background: white;
         border-radius: 16px;
         padding: 24px;
         margin-bottom: 30px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
         border: 1px solid #cfd8dc;
-        animation: fadeInUp 0.9s ease;
+        animation: fadeInUp 1s ease;
     }
 
     .section-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 24px;
+        margin-bottom: 20px;
     }
 
     .section-header h2 {
@@ -877,11 +1018,11 @@ $preview_data = array_slice($preview_data, 0, 10);
         color: #191970;
     }
 
-    .record-count {
-        padding: 6px 14px;
+    .badge {
+        padding: 4px 12px;
         background: #eceff1;
         border-radius: 20px;
-        font-size: 0.9rem;
+        font-size: 0.8rem;
         color: #191970;
         font-weight: 500;
     }
@@ -915,6 +1056,29 @@ $preview_data = array_slice($preview_data, 0, 10);
         border-bottom: 1px solid #cfd8dc;
     }
 
+    .type-badge {
+        padding: 4px 8px;
+        border-radius: 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        display: inline-block;
+    }
+
+    .type-visit {
+        background: #e3f2fd;
+        color: #1976d2;
+    }
+
+    .type-incident {
+        background: #ffebee;
+        color: #c62828;
+    }
+
+    .type-clearance {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+
     .no-data {
         text-align: center;
         padding: 40px;
@@ -934,16 +1098,16 @@ $preview_data = array_slice($preview_data, 0, 10);
     }
 
     @media (max-width: 1280px) {
-        .ai-grid {
-            grid-template-columns: 1fr;
-        }
-        
-        .charts-grid {
-            grid-template-columns: 1fr;
+        .insights-grid {
+            grid-template-columns: repeat(2, 1fr);
         }
         
         .stats-grid {
             grid-template-columns: repeat(2, 1fr);
+        }
+        
+        .charts-grid {
+            grid-template-columns: 1fr;
         }
     }
 
@@ -953,17 +1117,16 @@ $preview_data = array_slice($preview_data, 0, 10);
             padding: 20px 15px;
         }
         
+        .insights-grid {
+            grid-template-columns: 1fr;
+        }
+        
         .stats-grid {
             grid-template-columns: 1fr;
         }
         
         .filter-grid {
             grid-template-columns: 1fr;
-        }
-        
-        .export-options {
-            flex-direction: column;
-            gap: 12px;
         }
     }
     </style>
@@ -979,69 +1142,51 @@ $preview_data = array_slice($preview_data, 0, 10);
                 <div class="page-header">
                     <div>
                         <h1>Analytics Dashboard</h1>
-                        <p>AI-powered insights and predictive analytics for clinic management</p>
+                        <p>AI-powered insights and key metrics for informed decision making</p>
                     </div>
                     <div class="header-actions">
-                        <button class="btn btn-secondary" onclick="resetFilters()">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M3 6H21M6 12H18M10 18H14" stroke-linecap="round"/>
-                            </svg>
-                            Reset Filters
-                        </button>
-                        <button class="btn btn-info" onclick="refreshAIInsights()">
+                        <button class="btn btn-outline" onclick="refreshData()">
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M23 4V10H17"/>
                                 <path d="M1 20V14H7"/>
-                                <path d="M3.51 9C4.01717 7.56678 4.87913 6.2854 6.01547 5.27542C7.1518 4.26544 8.52547 3.55976 10.0083 3.22426C11.4911 2.88875 13.0348 2.93434 14.4971 3.35714C15.9594 3.77994 17.2919 4.56427 18.37 5.64L23 10M1 14L5.64 18.36C6.71815 19.4357 8.05064 20.2201 9.51294 20.6429C10.9752 21.0657 12.5189 21.1113 14.0017 20.7757C15.4845 20.4402 16.8582 19.7346 17.9845 18.7246C19.1109 17.7146 19.9728 16.4332 20.48 15"/>
+                                <path d="M3.51 9C4.01 7.6 4.81 6.3 5.86 5.25C7.38 3.73 9.33 2.75 11.4 2.38C13.47 2.01 15.61 2.27 17.5 3.1C19.4 3.94 20.99 5.29 22.1 6.99"/>
+                                <path d="M20.49 15C19.99 16.4 19.19 17.7 18.14 18.75C16.62 20.27 14.67 21.25 12.6 21.62C10.53 21.99 8.39 21.73 6.5 20.9C4.6 20.06 3.01 18.71 1.9 17.01"/>
                             </svg>
-                            Refresh AI Insights
+                            Refresh
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportAnalytics()">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15"/>
+                                <path d="M7 10L12 15L17 10"/>
+                                <path d="M12 15V3"/>
+                            </svg>
+                            Export
                         </button>
                     </div>
                 </div>
 
                 <!-- Filter Section -->
                 <div class="filter-section">
-                    <h2>Analytics Filters</h2>
-                    <form method="GET" action="" id="reportForm">
+                    <h2>Date Range Filter</h2>
+                    <form method="GET" action="" id="filterForm">
                         <div class="filter-grid">
                             <div class="filter-group">
-                                <label for="report_type">Analysis Type</label>
-                                <select name="report_type" id="report_type">
-                                    <option value="ai_insights" <?php echo $report_type == 'ai_insights' ? 'selected' : ''; ?>>AI Insights & Predictions</option>
-                                    <option value="summary" <?php echo $report_type == 'summary' ? 'selected' : ''; ?>>System Summary</option>
-                                    <option value="users" <?php echo $report_type == 'users' ? 'selected' : ''; ?>>Users Report</option>
-                                    <option value="patients" <?php echo $report_type == 'patients' ? 'selected' : ''; ?>>Patients Report</option>
-                                    <option value="incidents" <?php echo $report_type == 'incidents' ? 'selected' : ''; ?>>Incidents Report</option>
-                                    <option value="medicine_dispensed" <?php echo $report_type == 'medicine_dispensed' ? 'selected' : ''; ?>>Medicine Dispensed</option>
-                                    <option value="medicine_requests" <?php echo $report_type == 'medicine_requests' ? 'selected' : ''; ?>>Medicine Requests</option>
-                                    <option value="clearance_requests" <?php echo $report_type == 'clearance_requests' ? 'selected' : ''; ?>>Health Clearance</option>
-                                    <option value="visit_history" <?php echo $report_type == 'visit_history' ? 'selected' : ''; ?>>Visit History</option>
-                                    <option value="clinic_stock" <?php echo $report_type == 'clinic_stock' ? 'selected' : ''; ?>>Clinic Stock</option>
+                                <label for="date_range">Date Range</label>
+                                <select name="date_range" id="date_range" onchange="toggleCustomDates()">
+                                    <option value="7days" <?php echo $date_range == '7days' ? 'selected' : ''; ?>>Last 7 Days</option>
+                                    <option value="30days" <?php echo $date_range == '30days' ? 'selected' : ''; ?>>Last 30 Days</option>
+                                    <option value="90days" <?php echo $date_range == '90days' ? 'selected' : ''; ?>>Last 90 Days</option>
+                                    <option value="year" <?php echo $date_range == 'year' ? 'selected' : ''; ?>>Last Year</option>
+                                    <option value="custom" <?php echo $date_range == 'custom' ? 'selected' : ''; ?>>Custom Range</option>
                                 </select>
                             </div>
-                            <div class="filter-group">
-                                <label for="date_from">Date From</label>
-                                <input type="date" name="date_from" id="date_from" value="<?php echo $date_from; ?>">
+                            <div class="filter-group" id="custom_date_from_group" style="<?php echo $date_range != 'custom' ? 'display: none;' : ''; ?>">
+                                <label for="custom_date_from">From Date</label>
+                                <input type="date" name="custom_date_from" id="custom_date_from" value="<?php echo $custom_date_from; ?>">
                             </div>
-                            <div class="filter-group">
-                                <label for="date_to">Date To</label>
-                                <input type="date" name="date_to" id="date_to" value="<?php echo $date_to; ?>">
-                            </div>
-                            <div class="filter-group">
-                                <label for="search">Search</label>
-                                <input type="text" name="search" id="search" placeholder="Search records..." value="<?php echo htmlspecialchars($search); ?>">
-                            </div>
-                        </div>
-                        
-                        <div class="export-options">
-                            <span style="font-weight: 600; color: #191970;">Export Options:</span>
-                            <div class="export-option">
-                                <input type="radio" name="export_type" id="full" value="full" <?php echo $export_type == 'full' ? 'checked' : ''; ?>>
-                                <label for="full">Full Report (All records in date range)</label>
-                            </div>
-                            <div class="export-option">
-                                <input type="radio" name="export_type" id="partial" value="partial" <?php echo $export_type == 'partial' ? 'checked' : ''; ?>>
-                                <label for="partial">Partial Report (Filtered by search)</label>
+                            <div class="filter-group" id="custom_date_to_group" style="<?php echo $date_range != 'custom' ? 'display: none;' : ''; ?>">
+                                <label for="custom_date_to">To Date</label>
+                                <input type="date" name="custom_date_to" id="custom_date_to" value="<?php echo $custom_date_to; ?>">
                             </div>
                         </div>
 
@@ -1053,134 +1198,125 @@ $preview_data = array_slice($preview_data, 0, 10);
                                 </svg>
                                 Apply Filters
                             </button>
-                            <button type="submit" name="export" value="pdf" class="btn btn-success">
-                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15"/>
-                                    <path d="M7 10L12 15L17 10"/>
-                                    <path d="M12 15V3"/>
-                                </svg>
-                                Export to PDF
-                            </button>
                         </div>
                     </form>
                 </div>
 
                 <!-- AI Insights Section -->
-                <div class="ai-section">
+                <?php if (!empty($ai_insights)): ?>
+                <div class="ai-insights">
                     <div class="ai-header">
-                        <i>🤖</i>
-                        <h2>AI-Powered Insights</h2>
+                        <h2>🤖 AI-Powered Insights</h2>
+                        <span class="badge">Real-time Analytics</span>
                     </div>
-                    
-                    <div class="ai-grid">
-                        <div class="ai-card">
-                            <h3>Predicted Next Month</h3>
-                            <div class="value"><?php echo $ai_predictions['next_month_visits']; ?></div>
-                            <div class="label">Estimated Clinic Visits</div>
-                            <div class="trend up">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M18 15L12 9L6 15"/>
-                                </svg>
-                                Based on 30-day trend
-                            </div>
-                        </div>
-                        
-                        <div class="ai-card">
-                            <h3>Peak Hours</h3>
-                            <?php if (!empty($ai_predictions['peak_hours'])): ?>
-                                <?php foreach ($ai_predictions['peak_hours'] as $hour): ?>
-                                    <div class="value"><?php echo date('g A', strtotime($hour['hour'] . ':00')); ?></div>
-                                    <div class="label"><?php echo $hour['visit_count']; ?> visits during this hour</div>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <div class="value">N/A</div>
-                                <div class="label">Insufficient data</div>
-                            <?php endif; ?>
-                        </div>
-                        
-                        <div class="ai-card">
-                            <h3>Common Complaints</h3>
-                            <?php if (!empty($ai_predictions['common_complaints'])): ?>
-                                <?php foreach ($ai_predictions['common_complaints'] as $complaint): ?>
-                                    <div class="value"><?php echo round($complaint['percentage']); ?>%</div>
-                                    <div class="label"><?php echo $complaint['complaint']; ?></div>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <div class="value">N/A</div>
-                                <div class="label">No data available</div>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Anomaly Alerts -->
-                <?php if (!empty($anomalies)): ?>
-                    <?php if (!empty($anomalies['incident_spikes'])): ?>
-                        <div class="anomaly-alert">
-                            <strong>⚠️ Anomaly Detected:</strong> Unusual spike in incidents on 
-                            <?php foreach ($anomalies['incident_spikes'] as $spike): ?>
-                                <?php echo date('M d', strtotime($spike['date'])); ?> 
-                                (<?php echo $spike['daily_count']; ?> incidents)
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                    
-                    <?php if (!empty($anomalies['usage_spikes'])): ?>
-                        <div class="anomaly-alert">
-                            <strong>⚠️ Usage Anomaly:</strong> Unusual medicine consumption for 
-                            <?php foreach ($anomalies['usage_spikes'] as $spike): ?>
-                                <?php echo $spike['item_name']; ?> 
-                                (<?php echo $spike['total_used']; ?> units used)
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                <?php endif; ?>
-
-                <!-- Smart Recommendations -->
-                <?php if (!empty($recommendations)): ?>
-                <div class="recommendations-section">
-                    <div class="recommendations-header">
-                        <i style="font-size: 24px;">💡</i>
-                        <h2>Smart Recommendations</h2>
-                    </div>
-                    
-                    <div class="recommendations-grid">
-                        <?php foreach ($recommendations as $rec): ?>
-                        <div class="recommendation-item priority-<?php echo $rec['priority']; ?>">
-                            <div class="recommendation-icon" style="background: <?php 
-                                echo $rec['type'] == 'restock' ? '#ffebee' : 
-                                    ($rec['type'] == 'expiry' ? '#fff3e0' : 
-                                    ($rec['type'] == 'staffing' ? '#e3f2fd' : '#e8f5e9')); 
-                            ?>">
-                                <?php 
-                                echo $rec['type'] == 'restock' ? '📦' : 
-                                    ($rec['type'] == 'expiry' ? '⚠️' : 
-                                    ($rec['type'] == 'staffing' ? '👥' : '🏥')); 
-                                ?>
-                            </div>
-                            <div class="recommendation-content">
-                                <div class="recommendation-title"><?php echo ucfirst($rec['type']); ?> Recommendation</div>
-                                <div class="recommendation-message"><?php echo $rec['message']; ?></div>
-                            </div>
-                            <div class="recommendation-badge badge-<?php echo $rec['priority']; ?>">
-                                <?php echo $rec['priority']; ?> priority
-                            </div>
+                    <div class="insights-grid">
+                        <?php foreach ($ai_insights as $insight): ?>
+                        <div class="insight-card <?php echo $insight['type']; ?>">
+                            <div class="insight-icon"><?php echo $insight['icon']; ?></div>
+                            <div class="insight-title"><?php echo $insight['title']; ?></div>
+                            <div class="insight-message"><?php echo $insight['message']; ?></div>
                         </div>
                         <?php endforeach; ?>
                     </div>
                 </div>
                 <?php endif; ?>
 
-                <!-- Charts Section -->
+                <!-- Stats Grid -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">👥</div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['total_visits']; ?></h3>
+                            <p>Total Visits</p>
+                            <div class="stat-trend">
+                                <?php if ($stats['visits_change'] > 0): ?>
+                                <span class="trend-up">↑ <?php echo $stats['visits_change']; ?>%</span>
+                                <?php elseif ($stats['visits_change'] < 0): ?>
+                                <span class="trend-down">↓ <?php echo abs($stats['visits_change']); ?>%</span>
+                                <?php else: ?>
+                                <span>→ 0%</span>
+                                <?php endif; ?>
+                                <span>vs previous period</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🚨</div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['total_incidents']; ?></h3>
+                            <p>Incidents</p>
+                            <div class="stat-trend">
+                                <?php if ($stats['incidents_change'] > 0): ?>
+                                <span class="trend-up">↑ <?php echo $stats['incidents_change']; ?>%</span>
+                                <?php elseif ($stats['incidents_change'] < 0): ?>
+                                <span class="trend-down">↓ <?php echo abs($stats['incidents_change']); ?>%</span>
+                                <?php else: ?>
+                                <span>→ 0%</span>
+                                <?php endif; ?>
+                                <span>vs previous</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">💊</div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['total_dispensed']; ?></h3>
+                            <p>Items Dispensed</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📋</div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['pending_requests']; ?></h3>
+                            <p>Pending Requests</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['total_clearance']; ?></h3>
+                            <p>Clearances</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⚠️</div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['low_stock']; ?></h3>
+                            <p>Low Stock Items</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📅</div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['expiring_soon']; ?></h3>
+                            <p>Expiring Soon</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🏥</div>
+                        <div class="stat-info">
+                            <h3><?php echo $stats['total_exams']; ?></h3>
+                            <p>Physical Exams</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Grid -->
                 <div class="charts-grid">
                     <div class="chart-card">
-                        <h3>Incidents by Type</h3>
+                        <h3>Visit Trends <span><?php echo date('M d', strtotime($date_from)); ?> - <?php echo date('M d', strtotime($date_to)); ?></span></h3>
+                        <div class="chart-container">
+                            <canvas id="visitTrendsChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Incident Distribution</h3>
                         <div class="chart-container">
                             <canvas id="incidentChart"></canvas>
                         </div>
                     </div>
                     <div class="chart-card">
-                        <h3>Clearance Request Status</h3>
+                        <h3>Clearance Status</h3>
                         <div class="chart-container">
                             <canvas id="clearanceChart"></canvas>
                         </div>
@@ -1192,145 +1328,71 @@ $preview_data = array_slice($preview_data, 0, 10);
                         </div>
                     </div>
                     <div class="chart-card">
-                        <h3>Monthly Trend</h3>
+                        <h3>Top 5 Complaints</h3>
                         <div class="chart-container">
-                            <canvas id="monthlyChart"></canvas>
+                            <canvas id="complaintsChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Stock Status</h3>
+                        <div class="chart-container">
+                            <canvas id="stockChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Physical Exam Fit Status</h3>
+                        <div class="chart-container">
+                            <canvas id="fitStatusChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Top 5 Dispensed Items</h3>
+                        <div class="chart-container">
+                            <canvas id="topItemsChart"></canvas>
                         </div>
                     </div>
                 </div>
 
-                <!-- Stats Grid -->
-                <div class="stats-grid">
-                    <?php
-                    // Get totals for stats
-                    $total_incidents = 0;
-                    foreach ($incident_chart as $item) {
-                        $total_incidents += $item['count'];
-                    }
-                    
-                    $total_clearance = 0;
-                    foreach ($clearance_chart as $item) {
-                        $total_clearance += $item['count'];
-                    }
-                    
-                    $total_requests = 0;
-                    foreach ($request_chart as $item) {
-                        $total_requests += $item['count'];
-                    }
-                    
-                    $total_visits = 0;
-                    foreach ($daily_visits as $item) {
-                        $total_visits += $item['count'];
-                    }
-                    ?>
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                <path d="M12 2L2 7L12 12L22 7L12 2Z"/>
-                                <path d="M2 17L12 22L22 17"/>
-                                <path d="M2 12L12 17L22 12"/>
-                            </svg>
-                        </div>
-                        <div class="stat-info">
-                            <h3><?php echo $total_incidents; ?></h3>
-                            <p>Total Incidents</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                                <path d="M7 11V7C7 4.23858 9.23858 2 12 2C14.7614 2 17 4.23858 17 7V11"/>
-                            </svg>
-                        </div>
-                        <div class="stat-info">
-                            <h3><?php echo $total_clearance; ?></h3>
-                            <p>Clearance Requests</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                <path d="M10.5 4.5L19.5 9.5L12 14L3 9.5L10.5 4.5Z"/>
-                                <path d="M3 14.5L10.5 19L19.5 14.5"/>
-                                <path d="M3 9.5V19.5"/>
-                                <path d="M19.5 9.5V19.5"/>
-                            </svg>
-                        </div>
-                        <div class="stat-info">
-                            <h3><?php echo $total_requests; ?></h3>
-                            <p>Medicine Requests</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                <circle cx="12" cy="8" r="4"/>
-                                <path d="M5.5 20V19C5.5 17.1435 6.2375 15.363 7.55025 14.0503C8.86301 12.7375 10.6435 12 12.5 12C14.3565 12 16.137 12.7375 17.4497 14.0503C18.7625 15.363 19.5 17.1435 19.5 19V20"/>
-                            </svg>
-                        </div>
-                        <div class="stat-info">
-                            <h3><?php echo $total_visits; ?></h3>
-                            <p>Clinic Visits</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Data Preview -->
-                <div class="preview-section">
+                <!-- Recent Activity -->
+                <div class="recent-activity">
                     <div class="section-header">
-                        <h2>Data Preview - <?php echo ucwords(str_replace('_', ' ', $report_type)); ?></h2>
-                        <span class="record-count"><?php echo $preview_count; ?> records found</span>
+                        <h2>Recent Activity</h2>
+                        <span class="badge">Last 10 Records</span>
                     </div>
                     <div class="table-wrapper">
-                        <?php if (empty($preview_data)): ?>
+                        <?php if (empty($recent_activity)): ?>
                             <div class="no-data">
                                 <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#546e7a" stroke-width="1.5">
                                     <circle cx="12" cy="12" r="10"/>
                                     <path d="M12 8V12L12 16"/>
                                 </svg>
-                                <p style="margin-top: 16px;">No data available for the selected filters.</p>
+                                <p style="margin-top: 16px;">No activity data available for the selected period.</p>
                             </div>
                         <?php else: ?>
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <?php
-                                    if (!empty($preview_data)) {
-                                        $first_row = $preview_data[0];
-                                        foreach (array_keys($first_row) as $key) {
-                                            if (!in_array($key, ['id', 'password', 'token'])) {
-                                                echo '<th>' . ucwords(str_replace('_', ' ', $key)) . '</th>';
-                                            }
-                                        }
-                                    }
-                                    ?>
+                                    <th>Type</th>
+                                    <th>Student ID</th>
+                                    <th>Student Name</th>
+                                    <th>Date</th>
+                                    <th>Description</th>
+                                    <th>Attended/Approved By</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($preview_data as $row): ?>
+                                <?php foreach ($recent_activity as $activity): ?>
                                 <tr>
-                                    <?php foreach ($row as $key => $value): ?>
-                                        <?php if (!in_array($key, ['id', 'password', 'token'])): ?>
-                                        <td>
-                                            <?php 
-                                            if (is_null($value) || $value === '') {
-                                                echo 'N/A';
-                                            } elseif (strpos($key, 'date') !== false || strpos($key, 'Date') !== false) {
-                                                if (strtotime($value)) {
-                                                    echo date('Y-m-d', strtotime($value));
-                                                } else {
-                                                    echo htmlspecialchars($value);
-                                                }
-                                            } elseif (strlen($value) > 30) {
-                                                echo htmlspecialchars(substr($value, 0, 30)) . '...';
-                                            } else {
-                                                echo htmlspecialchars($value);
-                                            }
-                                            ?>
-                                        </td>
-                                        <?php endif; ?>
-                                    <?php endforeach; ?>
+                                    <td>
+                                        <span class="type-badge type-<?php echo strtolower($activity['type']); ?>">
+                                            <?php echo $activity['type']; ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo htmlspecialchars($activity['student_id']); ?></td>
+                                    <td><?php echo htmlspecialchars($activity['student_name']); ?></td>
+                                    <td><?php echo date('M d, Y', strtotime($activity['date'])); ?></td>
+                                    <td><?php echo htmlspecialchars(substr($activity['description'], 0, 30)) . (strlen($activity['description']) > 30 ? '...' : ''); ?></td>
+                                    <td><?php echo htmlspecialchars($activity['attended_by'] ?? 'N/A'); ?></td>
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -1355,121 +1417,99 @@ $preview_data = array_slice($preview_data, 0, 10);
             });
         }
 
-        // Reset filters
-        function resetFilters() {
-            document.getElementById('report_type').value = 'ai_insights';
-            document.getElementById('date_from').value = '<?php echo date('Y-m-d', strtotime('-30 days')); ?>';
-            document.getElementById('date_to').value = '<?php echo date('Y-m-d'); ?>';
-            document.getElementById('search').value = '';
-            document.getElementById('full').checked = true;
-            document.getElementById('reportForm').submit();
+        // Toggle custom date inputs
+        function toggleCustomDates() {
+            const dateRange = document.getElementById('date_range').value;
+            const customFrom = document.getElementById('custom_date_from_group');
+            const customTo = document.getElementById('custom_date_to_group');
+            
+            if (dateRange === 'custom') {
+                customFrom.style.display = 'block';
+                customTo.style.display = 'block';
+            } else {
+                customFrom.style.display = 'none';
+                customTo.style.display = 'none';
+            }
         }
 
-        // Refresh AI Insights
-        function refreshAIInsights() {
+        // Refresh data
+        function refreshData() {
             location.reload();
+        }
+
+        // Export analytics
+        function exportAnalytics() {
+            // Create a printable version
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write(`
+                <html>
+                    <head>
+                        <title>Analytics Report - <?php echo date('Y-m-d'); ?></title>
+                        <style>
+                            body { font-family: Arial, sans-serif; padding: 20px; }
+                            h1 { color: #191970; }
+                            table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+                            th { background: #191970; color: white; padding: 10px; text-align: left; }
+                            td { padding: 8px; border: 1px solid #ddd; }
+                            .section { margin-bottom: 30px; }
+                        </style>
+                    </head>
+                    <body>
+                        <h1>Analytics Report</h1>
+                        <p>Generated: <?php echo date('F d, Y h:i A'); ?></p>
+                        <p>Period: <?php echo date('M d, Y', strtotime($date_from)); ?> - <?php echo date('M d, Y', strtotime($date_to)); ?></p>
+                        
+                        <div class="section">
+                            <h2>Key Metrics</h2>
+                            <table>
+                                <tr><th>Metric</th><th>Value</th></tr>
+                                <tr><td>Total Visits</td><td><?php echo $stats['total_visits']; ?></td></tr>
+                                <tr><td>Total Incidents</td><td><?php echo $stats['total_incidents']; ?></td></tr>
+                                <tr><td>Items Dispensed</td><td><?php echo $stats['total_dispensed']; ?></td></tr>
+                                <tr><td>Clearance Requests</td><td><?php echo $stats['total_clearance']; ?></td></tr>
+                                <tr><td>Low Stock Items</td><td><?php echo $stats['low_stock']; ?></td></tr>
+                                <tr><td>Expiring Soon</td><td><?php echo $stats['expiring_soon']; ?></td></tr>
+                            </table>
+                        </div>
+                        
+                        <div class="section">
+                            <h2>Recent Activity</h2>
+                            <table>
+                                <tr><th>Type</th><th>Student</th><th>Date</th><th>Description</th></tr>
+                                <?php foreach ($recent_activity as $activity): ?>
+                                <tr>
+                                    <td><?php echo $activity['type']; ?></td>
+                                    <td><?php echo $activity['student_name']; ?></td>
+                                    <td><?php echo date('Y-m-d', strtotime($activity['date'])); ?></td>
+                                    <td><?php echo htmlspecialchars(substr($activity['description'], 0, 50)); ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </table>
+                        </div>
+                    </body>
+                </html>
+            `);
+            printWindow.document.close();
+            printWindow.print();
         }
 
         // Initialize charts
         document.addEventListener('DOMContentLoaded', function() {
-            // Incident Chart
-            const incidentCtx = document.getElementById('incidentChart').getContext('2d');
-            new Chart(incidentCtx, {
-                type: 'pie',
-                data: {
-                    labels: <?php echo json_encode(array_column($incident_chart, 'incident_type')); ?>,
-                    datasets: [{
-                        data: <?php echo json_encode(array_column($incident_chart, 'count')); ?>,
-                        backgroundColor: ['#191970', '#ff9800', '#f44336'],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom'
-                        }
-                    }
-                }
-            });
-
-            // Clearance Chart
-            const clearanceCtx = document.getElementById('clearanceChart').getContext('2d');
-            new Chart(clearanceCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: <?php echo json_encode(array_column($clearance_chart, 'status')); ?>,
-                    datasets: [{
-                        data: <?php echo json_encode(array_column($clearance_chart, 'count')); ?>,
-                        backgroundColor: ['#4caf50', '#ff9800', '#f44336', '#9e9e9e'],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom'
-                        }
-                    }
-                }
-            });
-
-            // Request Chart
-            const requestCtx = document.getElementById('requestChart').getContext('2d');
-            new Chart(requestCtx, {
-                type: 'bar',
-                data: {
-                    labels: <?php echo json_encode(array_column($request_chart, 'status')); ?>,
-                    datasets: [{
-                        label: 'Number of Requests',
-                        data: <?php echo json_encode(array_column($request_chart, 'count')); ?>,
-                        backgroundColor: '#191970',
-                        borderRadius: 6
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: {
-                                display: false
-                            }
-                        },
-                        x: {
-                            grid: {
-                                display: false
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
-                    }
-                }
-            });
-
-            // Monthly Chart
-            const monthlyCtx = document.getElementById('monthlyChart').getContext('2d');
-            const monthlyLabels = <?php echo json_encode(array_column($monthly_trend, 'month')); ?>;
-            const monthlyCounts = <?php echo json_encode(array_column($monthly_trend, 'count')); ?>;
+            // Visit Trends Chart
+            const visitCtx = document.getElementById('visitTrendsChart').getContext('2d');
+            const visitDates = <?php echo json_encode(array_column($visit_trends, 'date')); ?>;
+            const visitCounts = <?php echo json_encode(array_column($visit_trends, 'count')); ?>;
             
-            new Chart(monthlyCtx, {
+            new Chart(visitCtx, {
                 type: 'line',
                 data: {
-                    labels: monthlyLabels.map(month => {
-                        const [year, monthNum] = month.split('-');
-                        return new Date(year, monthNum - 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                    labels: visitDates.map(date => {
+                        const d = new Date(date);
+                        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                     }),
                     datasets: [{
-                        label: 'Monthly Visits',
-                        data: monthlyCounts,
+                        label: 'Visits',
+                        data: visitCounts,
                         borderColor: '#191970',
                         backgroundColor: 'rgba(25, 25, 112, 0.1)',
                         tension: 0.4,
@@ -1503,16 +1543,233 @@ $preview_data = array_slice($preview_data, 0, 10);
                     }
                 }
             });
+
+            // Incident Chart
+            const incidentCtx = document.getElementById('incidentChart').getContext('2d');
+            new Chart(incidentCtx, {
+                type: 'pie',
+                data: {
+                    labels: <?php echo json_encode(array_column($incident_types, 'incident_type')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($incident_types, 'count')); ?>,
+                        backgroundColor: ['#191970', '#ff9800', '#f44336'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // Clearance Chart
+            const clearanceCtx = document.getElementById('clearanceChart').getContext('2d');
+            new Chart(clearanceCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: <?php echo json_encode(array_column($clearance_status, 'status')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($clearance_status, 'count')); ?>,
+                        backgroundColor: ['#4caf50', '#ff9800', '#f44336', '#9e9e9e'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // Request Chart
+            const requestCtx = document.getElementById('requestChart').getContext('2d');
+            new Chart(requestCtx, {
+                type: 'bar',
+                data: {
+                    labels: <?php echo json_encode(array_column($request_status, 'status')); ?>,
+                    datasets: [{
+                        label: 'Number of Requests',
+                        data: <?php echo json_encode(array_column($request_status, 'count')); ?>,
+                        backgroundColor: '#191970',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                display: false
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+
+            // Complaints Chart
+            const complaintsCtx = document.getElementById('complaintsChart').getContext('2d');
+            new Chart(complaintsCtx, {
+                type: 'bar',
+                data: {
+                    labels: <?php echo json_encode(array_column($top_complaints, 'complaint')); ?>,
+                    datasets: [{
+                        label: 'Number of Cases',
+                        data: <?php echo json_encode(array_column($top_complaints, 'count')); ?>,
+                        backgroundColor: '#ff9800',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: {
+                                display: false
+                            }
+                        },
+                        y: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+
+            // Stock Chart
+            const stockCtx = document.getElementById('stockChart').getContext('2d');
+            new Chart(stockCtx, {
+                type: 'pie',
+                data: {
+                    labels: <?php echo json_encode(array_column($stock_status, 'status')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($stock_status, 'count')); ?>,
+                        backgroundColor: ['#4caf50', '#ff9800', '#f44336'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // Fit Status Chart
+            const fitCtx = document.getElementById('fitStatusChart').getContext('2d');
+            new Chart(fitCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: <?php echo json_encode(array_column($fit_status, 'fit_for_school')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($fit_status, 'count')); ?>,
+                        backgroundColor: ['#4caf50', '#ff9800', '#f44336'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // Top Items Chart
+            const itemsCtx = document.getElementById('topItemsChart').getContext('2d');
+            new Chart(itemsCtx, {
+                type: 'bar',
+                data: {
+                    labels: <?php echo json_encode(array_column($top_items, 'item_name')); ?>,
+                    datasets: [{
+                        label: 'Quantity Dispensed',
+                        data: <?php echo json_encode(array_column($top_items, 'total_quantity')); ?>,
+                        backgroundColor: '#2196f3',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                display: false
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
         });
 
+        // Update page title
+        const pageTitle = document.getElementById('pageTitle');
+        if (pageTitle) {
+            pageTitle.textContent = 'Analytics';
+        }
+
         // Form validation
-        document.getElementById('reportForm').addEventListener('submit', function(e) {
-            const dateFrom = document.getElementById('date_from').value;
-            const dateTo = document.getElementById('date_to').value;
+        document.getElementById('filterForm').addEventListener('submit', function(e) {
+            const dateRange = document.getElementById('date_range').value;
             
-            if (dateFrom && dateTo && dateFrom > dateTo) {
-                e.preventDefault();
-                alert('Date From cannot be later than Date To');
+            if (dateRange === 'custom') {
+                const dateFrom = document.getElementById('custom_date_from').value;
+                const dateTo = document.getElementById('custom_date_to').value;
+                
+                if (!dateFrom || !dateTo) {
+                    e.preventDefault();
+                    alert('Please select both from and to dates for custom range');
+                } else if (dateFrom > dateTo) {
+                    e.preventDefault();
+                    alert('From date cannot be later than to date');
+                }
             }
         });
     </script>
