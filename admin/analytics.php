@@ -153,15 +153,16 @@ $stmt->execute();
 $top_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $chart_data['top_items'] = $top_items;
 
-// 9. Grade Level Distribution for Visits
+// 9. Grade Level Distribution from Incidents (alternative)
 $query = "SELECT 
-            LEFT(grade_section, LOCATE(' - ', grade_section) - 1) as grade_level,
+            grade_section,
             COUNT(*) as count 
-          FROM visit_history 
-          WHERE visit_date BETWEEN :date_from AND :date_to 
+          FROM incidents 
+          WHERE incident_date BETWEEN :date_from AND :date_to 
           AND grade_section IS NOT NULL 
-          GROUP BY grade_level 
-          ORDER BY count DESC";
+          GROUP BY grade_section 
+          ORDER BY count DESC 
+          LIMIT 5";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':date_from', $date_from);
 $stmt->bindParam(':date_to', $date_to);
