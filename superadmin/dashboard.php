@@ -51,11 +51,11 @@ $query = "SELECT COUNT(*) as total FROM medicine_requests";
 $stmt = $db->query($query);
 $stats['total_requests'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Recent audit logs (simulated - you may need to create this table)
+// Recent activities
 $recent_activities = [];
 
 // Get recent user registrations
-$query = "SELECT 'user_registration' as type, full_name, created_at, 'New user registered' as description 
+$query = "SELECT 'user_registration' as type, full_name as description, created_at 
           FROM users 
           ORDER BY created_at DESC 
           LIMIT 3";
@@ -70,8 +70,16 @@ $query = "SELECT 'incident' as type, CONCAT('Incident: ', description) as descri
 $stmt = $db->query($query);
 $incident_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Get recent clearance requests
+$query = "SELECT 'clearance' as type, CONCAT('Clearance: ', student_name) as description, created_at 
+          FROM clearance_requests 
+          ORDER BY created_at DESC 
+          LIMIT 3";
+$stmt = $db->query($query);
+$clearance_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Merge and sort activities
-$recent_activities = array_merge($user_activities, $incident_activities);
+$recent_activities = array_merge($user_activities, $incident_activities, $clearance_activities);
 usort($recent_activities, function($a, $b) {
     return strtotime($b['created_at']) - strtotime($a['created_at']);
 });
@@ -166,7 +174,7 @@ foreach ($weekly_data as $data) {
     .welcome-section h1 {
         font-size: 2.2rem;
         font-weight: 700;
-        color: #8b0000;
+        color: #191970;
         margin-bottom: 8px;
         letter-spacing: -0.5px;
     }
@@ -200,14 +208,14 @@ foreach ($weekly_data as $data) {
 
     .stat-card:hover {
         transform: translateY(-4px);
-        box-shadow: 0 8px 16px rgba(139, 0, 0, 0.1);
-        border-color: #8b0000;
+        box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
+        border-color: #191970;
     }
 
     .stat-icon {
         width: 60px;
         height: 60px;
-        background: #8b0000;
+        background: #191970;
         border-radius: 12px;
         display: flex;
         align-items: center;
@@ -223,7 +231,7 @@ foreach ($weekly_data as $data) {
     .stat-info h3 {
         font-size: 2rem;
         font-weight: 700;
-        color: #8b0000;
+        color: #191970;
         margin-bottom: 4px;
     }
 
@@ -286,7 +294,7 @@ foreach ($weekly_data as $data) {
     .chart-header h2, .activity-header h2, .health-header h2 {
         font-size: 1.2rem;
         font-weight: 600;
-        color: #8b0000;
+        color: #191970;
     }
 
     .chart-period {
@@ -307,15 +315,15 @@ foreach ($weekly_data as $data) {
     }
 
     .period-btn:hover {
-        background: #8b0000;
+        background: #191970;
         color: white;
-        border-color: #8b0000;
+        border-color: #191970;
     }
 
     .period-btn.active {
-        background: #8b0000;
+        background: #191970;
         color: white;
-        border-color: #8b0000;
+        border-color: #191970;
     }
 
     .chart-container {
@@ -335,7 +343,7 @@ foreach ($weekly_data as $data) {
 
     .chart-bar {
         width: 100%;
-        background: #8b0000;
+        background: #191970;
         border-radius: 6px 6px 0 0;
         min-height: 4px;
         transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
@@ -346,7 +354,7 @@ foreach ($weekly_data as $data) {
 
     .chart-bar:hover {
         opacity: 1;
-        background: #a52a2a;
+        background: #24248f;
     }
 
     .chart-bar:hover::after {
@@ -355,7 +363,7 @@ foreach ($weekly_data as $data) {
         top: -30px;
         left: 50%;
         transform: translateX(-50%);
-        background: #8b0000;
+        background: #191970;
         color: white;
         padding: 4px 8px;
         border-radius: 4px;
@@ -389,15 +397,15 @@ foreach ($weekly_data as $data) {
 
     .activity-item:hover {
         background: white;
-        border-color: #8b0000;
+        border-color: #191970;
         transform: translateX(5px);
-        box-shadow: 0 2px 8px rgba(139, 0, 0, 0.1);
+        box-shadow: 0 2px 8px rgba(25, 25, 112, 0.1);
     }
 
     .activity-icon {
         width: 40px;
         height: 40px;
-        background: #8b0000;
+        background: #191970;
         border-radius: 10px;
         display: flex;
         align-items: center;
@@ -412,7 +420,7 @@ foreach ($weekly_data as $data) {
     .activity-title {
         font-weight: 600;
         font-size: 0.9rem;
-        color: #8b0000;
+        color: #191970;
         margin-bottom: 4px;
     }
 
@@ -487,7 +495,7 @@ foreach ($weekly_data as $data) {
 
     .progress-fill {
         height: 100%;
-        background: #8b0000;
+        background: #191970;
         border-radius: 4px;
         transition: width 0.3s ease;
     }
@@ -514,14 +522,14 @@ foreach ($weekly_data as $data) {
 
     .access-card:hover {
         transform: translateY(-4px);
-        border-color: #8b0000;
-        box-shadow: 0 8px 16px rgba(139, 0, 0, 0.1);
+        border-color: #191970;
+        box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
     }
 
     .access-icon {
         width: 64px;
         height: 64px;
-        background: #8b0000;
+        background: #191970;
         border-radius: 12px;
         display: flex;
         align-items: center;
@@ -533,14 +541,14 @@ foreach ($weekly_data as $data) {
     }
 
     .access-card:hover .access-icon {
-        background: #a52a2a;
+        background: #24248f;
         transform: scale(1.05);
     }
 
     .access-card span {
         display: block;
         font-weight: 600;
-        color: #8b0000;
+        color: #191970;
         font-size: 1rem;
         margin-bottom: 8px;
     }
@@ -571,11 +579,11 @@ foreach ($weekly_data as $data) {
     .section-header h2 {
         font-size: 1.2rem;
         font-weight: 600;
-        color: #8b0000;
+        color: #191970;
     }
 
     .view-all {
-        color: #8b0000;
+        color: #191970;
         text-decoration: none;
         font-size: 0.9rem;
         font-weight: 500;
@@ -587,9 +595,9 @@ foreach ($weekly_data as $data) {
     }
 
     .view-all:hover {
-        background: #8b0000;
+        background: #191970;
         color: white;
-        border-color: #8b0000;
+        border-color: #191970;
     }
 
     .table-wrapper {
@@ -656,15 +664,15 @@ foreach ($weekly_data as $data) {
         border-radius: 6px;
         font-size: 0.8rem;
         font-weight: 500;
-        color: #8b0000;
+        color: #191970;
         cursor: pointer;
         transition: all 0.3s ease;
     }
 
     .action-btn-small:hover {
-        background: #8b0000;
+        background: #191970;
         color: white;
-        border-color: #8b0000;
+        border-color: #191970;
     }
 
     @keyframes fadeInUp {
@@ -717,7 +725,7 @@ foreach ($weekly_data as $data) {
             
             <div class="dashboard-container">
                 <div class="welcome-section">
-                    <h1>Welcome back, <?php echo htmlspecialchars($_SESSION['username']); ?>! 🔐</h1>
+                    <h1>Welcome back, <?php echo htmlspecialchars($_SESSION['username']); ?>! 👑</h1>
                     <p>System overview and management at a glance.</p>
                 </div>
 
@@ -898,10 +906,13 @@ foreach ($weekly_data as $data) {
                                         <?php if ($activity['type'] == 'user_registration'): ?>
                                         <circle cx="12" cy="8" r="4"/>
                                         <path d="M5.5 20V19C5.5 17.1435 6.2375 15.363 7.55025 14.0503C8.86301 12.7375 10.6435 12 12.5 12C14.3565 12 16.137 12.7375 17.4497 14.0503C18.7625 15.363 19.5 17.1435 19.5 19V20"/>
-                                        <?php else: ?>
+                                        <?php elseif ($activity['type'] == 'incident'): ?>
                                         <path d="M12 2L2 7L12 12L22 7L12 2Z"/>
                                         <path d="M2 17L12 22L22 17"/>
                                         <path d="M2 12L12 17L22 12"/>
+                                        <?php else: ?>
+                                        <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999"/>
+                                        <path d="M22 4L12 14.01L9 11.01"/>
                                         <?php endif; ?>
                                     </svg>
                                 </div>

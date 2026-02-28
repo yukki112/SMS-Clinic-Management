@@ -119,18 +119,6 @@ if (session_status() === PHP_SESSION_NONE) {
                                     <span class="notification-time">1 hour ago</span>
                                 </div>
                             </div>
-                            <div class="notification-item">
-                                <div class="notification-icon info">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                        <circle cx="12" cy="12" r="10"/>
-                                        <path d="M12 16V12M12 8H12.01"/>
-                                    </svg>
-                                </div>
-                                <div class="notification-content">
-                                    <p class="notification-text">New update available for system</p>
-                                    <span class="notification-time">2 hours ago</span>
-                                </div>
-                            </div>
                         </div>
                         <div class="dropdown-footer">
                             <a href="system_logs.php">View all system logs</a>
@@ -214,7 +202,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 .page-badge {
     padding: 4px 10px;
-    background: linear-gradient(135deg, #8b0000, #a52a2a);
+    background: #191970;
     border-radius: 20px;
     font-size: 0.7rem;
     font-weight: 600;
@@ -523,7 +511,7 @@ if (session_status() === PHP_SESSION_NONE) {
     width: 36px;
     height: 36px;
     border-radius: 10px;
-    background: linear-gradient(135deg, #8b0000, #a52a2a);
+    background: #191970;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -597,7 +585,7 @@ if (session_status() === PHP_SESSION_NONE) {
     width: 48px;
     height: 48px;
     border-radius: 14px;
-    background: linear-gradient(135deg, #8b0000, #a52a2a);
+    background: #191970;
     display: flex;
     align-items: center;
     justify-content: center;
