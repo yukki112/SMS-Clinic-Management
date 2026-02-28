@@ -115,7 +115,7 @@
                         </div>
                         <div class="profile-info">
                             <span class="profile-name"><?php echo htmlspecialchars($_SESSION['username'] ?? 'Admin User'); ?></span>
-                            <span class="profile-role">Administrator</span>
+                            <span class="profile-role">Doctor</span>
                         </div>
                         <svg class="profile-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M6 9L12 15L18 9" stroke-linecap="round" stroke-linejoin="round"/>
