@@ -21,6 +21,36 @@ $search_error = '';
 $student_id_search = isset($_GET['student_id']) ? $_GET['student_id'] : '';
 $success_message = '';
 $error_message = '';
+$show_verification_modal = false;
+
+// Check if verification was completed
+if (isset($_SESSION['verified_student_id_health']) && $_SESSION['verified_student_id_health'] === $student_id_search) {
+    $show_verification_modal = false;
+} elseif (!empty($student_id_search) && !isset($_POST['action'])) {
+    $show_verification_modal = true;
+}
+
+// Handle verification submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['verify_access'])) {
+    $user_id = $_SESSION['user_id'];
+    $password = $_POST['password'];
+    
+    // Verify password
+    $query = "SELECT password FROM users WHERE id = :user_id";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':user_id', $user_id);
+    $stmt->execute();
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($user && password_verify($password, $user['password'])) {
+        $_SESSION['verified_student_id_health'] = $_POST['student_id'];
+        header("Location: " . strtok($_SERVER["REQUEST_URI"], '?') . "?student_id=" . urlencode($_POST['student_id']));
+        exit();
+    } else {
+        $verification_error = "Invalid password. Access denied.";
+        $show_verification_modal = true;
+    }
+}
 
 // Function to fetch data from school event management API
 function fetchHealthProgramsFromAPI() {
@@ -432,8 +462,8 @@ $physical_exam_count = count(getPhysicalExamRecords($db));
 $deworming_count = count(getDewormingRecords($db));
 $screening_count = count(getHealthScreeningRecords($db));
 
-// Search for student if ID provided
-if (!empty($student_id_search)) {
+// Search for student if ID provided and verified
+if (!empty($student_id_search) && isset($_SESSION['verified_student_id_health']) && $_SESSION['verified_student_id_health'] === $student_id_search && !isset($_POST['action'])) {
     $api_url = "https://ttm.qcprotektado.com/api/students.php";
     
     $ch = curl_init();
@@ -467,13 +497,23 @@ if (!empty($student_id_search)) {
             
             if (!$found) {
                 $search_error = "Student ID not found in the system.";
+                unset($_SESSION['verified_student_id_health']);
             }
         } else {
             $search_error = "Unable to fetch student data.";
+            unset($_SESSION['verified_student_id_health']);
         }
     } else {
         $search_error = "Error connecting to student database.";
+        unset($_SESSION['verified_student_id_health']);
     }
+} elseif (!empty($student_id_search) && (!isset($_SESSION['verified_student_id_health']) || $_SESSION['verified_student_id_health'] !== $student_id_search)) {
+    $show_verification_modal = true;
+}
+
+// Clear verification if no student ID
+if (empty($student_id_search) && isset($_SESSION['verified_student_id_health'])) {
+    unset($_SESSION['verified_student_id_health']);
 }
 ?>
 <!DOCTYPE html>
@@ -494,7 +534,7 @@ if (!empty($student_id_search)) {
 
         body {
             font-family: 'Inter', sans-serif;
-            background: #f0f7ff;
+            background: #eceff1;
             min-height: 100vh;
             position: relative;
             overflow-x: hidden;
@@ -512,7 +552,7 @@ if (!empty($student_id_search)) {
             padding: 20px 30px 30px 30px;
             transition: margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
-            background: #f0f7ff;
+            background: #eceff1;
         }
 
         .main-content.expanded {
@@ -532,17 +572,174 @@ if (!empty($student_id_search)) {
         .welcome-section h1 {
             font-size: 2.2rem;
             font-weight: 700;
-            background: linear-gradient(135deg, #0b4f6c 0%, #1a7f7a 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: #191970;
             margin-bottom: 8px;
             letter-spacing: -0.5px;
         }
 
         .welcome-section p {
-            color: #2c5f6e;
+            color: #546e7a;
             font-size: 1rem;
             font-weight: 400;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-container {
+            background: white;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 450px;
+            padding: 30px;
+            box-shadow: 0 8px 16px rgba(25, 25, 112, 0.2);
+            animation: slideUp 0.3s ease;
+        }
+
+        .modal-icon {
+            width: 70px;
+            height: 70px;
+            background: #191970;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            color: white;
+        }
+
+        .modal-icon svg {
+            width: 35px;
+            height: 35px;
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #191970;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .modal-subtitle {
+            color: #546e7a;
+            text-align: center;
+            margin-bottom: 25px;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .modal-form {
+            margin-top: 20px;
+        }
+
+        .modal-form .form-group {
+            margin-bottom: 20px;
+        }
+
+        .modal-form label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #546e7a;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .modal-form .form-control {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 1rem;
+            border: 2px solid #cfd8dc;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .modal-form .form-control:focus {
+            outline: none;
+            border-color: #191970;
+            box-shadow: 0 0 0 3px rgba(25, 25, 112, 0.1);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 25px;
+        }
+
+        .modal-btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .modal-btn.primary {
+            background: #191970;
+            color: white;
+        }
+
+        .modal-btn.primary:hover {
+            background: #24248f;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.2);
+        }
+
+        .modal-btn.secondary {
+            background: #eceff1;
+            color: #37474f;
+            border: 1px solid #cfd8dc;
+        }
+
+        .modal-btn.secondary:hover {
+            background: #cfd8dc;
+        }
+
+        .modal-error {
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            border-radius: 12px;
+            padding: 12px 16px;
+            color: #c62828;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* Stats Grid */
@@ -556,27 +753,27 @@ if (!empty($student_id_search)) {
 
         .stat-card {
             background: white;
-            border-radius: 20px;
+            border-radius: 16px;
             padding: 24px;
             display: flex;
             align-items: center;
             gap: 16px;
             transition: all 0.3s ease;
-            box-shadow: 0 4px 6px -1px rgba(11, 79, 108, 0.1), 0 2px 4px -1px rgba(11, 79, 108, 0.06);
-            border: 1px solid #c1d9e6;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
         }
 
         .stat-card:hover {
             transform: translateY(-4px);
-            box-shadow: 0 20px 25px -5px rgba(11, 79, 108, 0.2), 0 10px 10px -5px rgba(11, 79, 108, 0.1);
-            border-color: #1a7f7a;
+            box-shadow: 0 8px 16px rgba(25, 25, 112, 0.1);
+            border-color: #191970;
         }
 
         .stat-icon {
             width: 60px;
             height: 60px;
-            background: linear-gradient(135deg, #0b4f6c 0%, #1a7f7a 100%);
-            border-radius: 16px;
+            background: #191970;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -591,16 +788,27 @@ if (!empty($student_id_search)) {
         .stat-info h3 {
             font-size: 2rem;
             font-weight: 700;
-            color: #0b4f6c;
+            color: #191970;
             margin-bottom: 4px;
         }
 
         .stat-info p {
-            color: #2c5f6e;
+            color: #546e7a;
             font-size: 0.8rem;
             font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+
+        .warning-badge {
+            background: #ffebee;
+            color: #c62828;
+            padding: 4px 8px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            display: inline-block;
+            margin-top: 4px;
         }
 
         /* Alert Messages */
@@ -615,15 +823,21 @@ if (!empty($student_id_search)) {
         }
 
         .alert-success {
-            background: #d4edda;
-            border: 1px solid #a3cfbb;
-            color: #0b5e42;
+            background: #e8f5e9;
+            border: 1px solid #a5d6a7;
+            color: #2e7d32;
         }
 
         .alert-error {
-            background: #f8d7da;
-            border: 1px solid #f5c2c7;
-            color: #842029;
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            color: #c62828;
+        }
+
+        .alert-info {
+            background: #e3f2fd;
+            border: 1px solid #90caf9;
+            color: #1565c0;
         }
 
         @keyframes slideIn {
@@ -649,16 +863,16 @@ if (!empty($student_id_search)) {
         /* Search Card */
         .search-card {
             background: white;
-            border-radius: 20px;
+            border-radius: 16px;
             padding: 24px;
-            box-shadow: 0 4px 6px -1px rgba(11, 79, 108, 0.1), 0 2px 4px -1px rgba(11, 79, 108, 0.06);
-            border: 1px solid #c1d9e6;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
         }
 
         .card-title {
             font-size: 1.1rem;
             font-weight: 600;
-            color: #0b4f6c;
+            color: #191970;
             margin-bottom: 20px;
             display: flex;
             align-items: center;
@@ -668,7 +882,7 @@ if (!empty($student_id_search)) {
         .card-title svg {
             width: 24px;
             height: 24px;
-            color: #1a7f7a;
+            color: #191970;
         }
 
         .search-form {
@@ -683,7 +897,7 @@ if (!empty($student_id_search)) {
             display: block;
             font-size: 0.8rem;
             font-weight: 600;
-            color: #2c5f6e;
+            color: #546e7a;
             margin-bottom: 6px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -693,22 +907,22 @@ if (!empty($student_id_search)) {
             width: 100%;
             padding: 12px 16px;
             font-size: 0.95rem;
-            border: 2px solid #c1d9e6;
-            border-radius: 12px;
+            border: 2px solid #cfd8dc;
+            border-radius: 10px;
             transition: all 0.3s ease;
             background: white;
-            color: #1e3b4a;
+            color: #37474f;
         }
 
         .form-control:focus {
             outline: none;
-            border-color: #1a7f7a;
-            box-shadow: 0 0 0 3px rgba(26, 127, 122, 0.1);
+            border-color: #191970;
+            box-shadow: 0 0 0 3px rgba(25, 25, 112, 0.1);
         }
 
         select.form-control {
             appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%232c5f6e' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23546e7a' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
             background-repeat: no-repeat;
             background-position: right 12px center;
             background-size: 16px;
@@ -734,7 +948,7 @@ if (!empty($student_id_search)) {
         .btn {
             padding: 12px 24px;
             border: none;
-            border-radius: 12px;
+            border-radius: 10px;
             font-size: 0.95rem;
             font-weight: 600;
             cursor: pointer;
@@ -742,24 +956,25 @@ if (!empty($student_id_search)) {
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #0b4f6c 0%, #1a7f7a 100%);
+            background: #191970;
             color: white;
             width: 100%;
         }
 
         .btn-primary:hover {
+            background: #24248f;
             transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(11, 79, 108, 0.3);
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.2);
         }
 
         .btn-secondary {
-            background: #e4f0f5;
-            color: #0b4f6c;
-            border: 1px solid #c1d9e6;
+            background: #eceff1;
+            color: #37474f;
+            border: 1px solid #cfd8dc;
         }
 
         .btn-secondary:hover {
-            background: #c1d9e6;
+            background: #cfd8dc;
         }
 
         .btn-sm {
@@ -770,10 +985,10 @@ if (!empty($student_id_search)) {
         /* Quick Stats Card */
         .quick-stats-card {
             background: white;
-            border-radius: 20px;
+            border-radius: 16px;
             padding: 24px;
-            box-shadow: 0 4px 6px -1px rgba(11, 79, 108, 0.1), 0 2px 4px -1px rgba(11, 79, 108, 0.06);
-            border: 1px solid #c1d9e6;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
         }
 
         .event-list {
@@ -784,7 +999,7 @@ if (!empty($student_id_search)) {
 
         .event-item {
             padding: 12px 0;
-            border-bottom: 1px solid #e4f0f5;
+            border-bottom: 1px solid #eceff1;
         }
 
         .event-item:last-child {
@@ -793,13 +1008,13 @@ if (!empty($student_id_search)) {
 
         .event-name {
             font-weight: 600;
-            color: #0b4f6c;
+            color: #191970;
             margin-bottom: 4px;
         }
 
         .event-date {
             font-size: 0.8rem;
-            color: #1a7f7a;
+            color: #546e7a;
             display: flex;
             align-items: center;
             gap: 4px;
@@ -811,8 +1026,8 @@ if (!empty($student_id_search)) {
             border-radius: 30px;
             font-size: 0.7rem;
             font-weight: 600;
-            background: #e4f0f5;
-            color: #0b4f6c;
+            background: #eceff1;
+            color: #191970;
         }
 
         .clearance-badge {
@@ -821,16 +1036,16 @@ if (!empty($student_id_search)) {
             border-radius: 30px;
             font-size: 0.7rem;
             font-weight: 600;
-            background: #ffecb3;
+            background: #fff3cd;
             color: #856404;
         }
 
         /* Tabs */
         .tabs-section {
             background: white;
-            border-radius: 24px;
-            box-shadow: 0 10px 15px -3px rgba(11, 79, 108, 0.1), 0 4px 6px -2px rgba(11, 79, 108, 0.05);
-            border: 1px solid #c1d9e6;
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
             overflow: hidden;
             margin-bottom: 30px;
             animation: fadeInUp 0.8s ease;
@@ -838,8 +1053,8 @@ if (!empty($student_id_search)) {
 
         .tabs-header {
             display: flex;
-            border-bottom: 2px solid #e4f0f5;
-            background: #f8fcfd;
+            border-bottom: 2px solid #eceff1;
+            background: #f5f5f5;
             overflow-x: auto;
             padding: 0 20px;
         }
@@ -850,7 +1065,7 @@ if (!empty($student_id_search)) {
             border: none;
             font-size: 0.95rem;
             font-weight: 600;
-            color: #2c5f6e;
+            color: #78909c;
             cursor: pointer;
             transition: all 0.3s ease;
             position: relative;
@@ -858,11 +1073,12 @@ if (!empty($student_id_search)) {
         }
 
         .tab-btn:hover {
-            color: #1a7f7a;
+            color: #191970;
+            background: rgba(25, 25, 112, 0.05);
         }
 
         .tab-btn.active {
-            color: #1a7f7a;
+            color: #191970;
         }
 
         .tab-btn.active::after {
@@ -872,7 +1088,7 @@ if (!empty($student_id_search)) {
             left: 0;
             right: 0;
             height: 2px;
-            background: #1a7f7a;
+            background: #191970;
         }
 
         .tab-content {
@@ -889,17 +1105,17 @@ if (!empty($student_id_search)) {
 
         /* Form Cards */
         .form-card {
-            background: #f8fcfd;
-            border-radius: 16px;
+            background: #f8fafc;
+            border-radius: 12px;
             padding: 24px;
             margin-bottom: 30px;
-            border: 1px solid #c1d9e6;
+            border: 1px solid #cfd8dc;
         }
 
         .form-card-title {
             font-size: 1rem;
             font-weight: 600;
-            color: #0b4f6c;
+            color: #191970;
             margin-bottom: 20px;
             display: flex;
             align-items: center;
@@ -909,26 +1125,26 @@ if (!empty($student_id_search)) {
         .form-card-title svg {
             width: 20px;
             height: 20px;
-            color: #1a7f7a;
+            color: #191970;
         }
 
         /* Student Info Bar */
         .student-info-bar {
-            background: #e4f0f5;
+            background: #eceff1;
             border-radius: 16px;
             padding: 20px;
             margin-bottom: 24px;
             display: flex;
             align-items: center;
             gap: 20px;
-            border: 1px solid #c1d9e6;
+            border: 1px solid #cfd8dc;
         }
 
         .student-avatar-sm {
             width: 70px;
             height: 70px;
-            background: linear-gradient(135deg, #0b4f6c 0%, #1a7f7a 100%);
-            border-radius: 16px;
+            background: #191970;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -940,20 +1156,48 @@ if (!empty($student_id_search)) {
         .student-details h3 {
             font-size: 1.3rem;
             font-weight: 600;
-            color: #0b4f6c;
+            color: #191970;
             margin-bottom: 6px;
         }
 
         .student-details p {
-            color: #2c5f6e;
+            color: #546e7a;
             font-size: 0.95rem;
+        }
+
+        .health-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 30px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .badge-success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .badge-danger {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .badge-info {
+            background: #e3f2fd;
+            color: #1565c0;
         }
 
         /* Tables */
         .table-wrapper {
             overflow-x: auto;
-            border-radius: 16px;
-            border: 1px solid #c1d9e6;
+            border-radius: 12px;
+            border: 1px solid #cfd8dc;
             margin-top: 20px;
         }
 
@@ -967,56 +1211,28 @@ if (!empty($student_id_search)) {
             padding: 16px 12px;
             font-size: 0.8rem;
             font-weight: 600;
-            color: #2c5f6e;
+            color: #78909c;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            border-bottom: 2px solid #c1d9e6;
-            background: #e4f0f5;
+            border-bottom: 2px solid #cfd8dc;
+            background: #eceff1;
         }
 
         .data-table td {
             padding: 16px 12px;
             font-size: 0.9rem;
-            color: #1e3b4a;
-            border-bottom: 1px solid #e4f0f5;
+            color: #37474f;
+            border-bottom: 1px solid #eceff1;
         }
 
         .data-table tr:hover td {
-            background: #f8fcfd;
-        }
-
-        .health-badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 30px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-
-        .badge-success {
-            background: #d4edda;
-            color: #0b5e42;
-        }
-
-        .badge-warning {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .badge-danger {
-            background: #f8d7da;
-            color: #842029;
-        }
-
-        .badge-info {
-            background: #d1ecf1;
-            color: #0c5460;
+            background: #f5f5f5;
         }
 
         .empty-state {
             text-align: center;
             padding: 50px 20px;
-            color: #2c5f6e;
+            color: #78909c;
         }
 
         .empty-state svg {
@@ -1024,18 +1240,18 @@ if (!empty($student_id_search)) {
             height: 60px;
             margin-bottom: 20px;
             opacity: 0.5;
-            color: #1a7f7a;
+            color: #90a4ae;
         }
 
         .empty-state p {
             font-size: 1rem;
             margin-bottom: 5px;
-            color: #0b4f6c;
+            color: #37474f;
         }
 
         .empty-state small {
             font-size: 0.85rem;
-            color: #2c5f6e;
+            color: #78909c;
         }
 
         /* Metrics Grid */
@@ -1047,16 +1263,16 @@ if (!empty($student_id_search)) {
         }
 
         .metric-card {
-            background: #f8fcfd;
-            border-radius: 16px;
+            background: #f8fafc;
+            border-radius: 12px;
             padding: 20px;
-            border: 1px solid #c1d9e6;
+            border: 1px solid #cfd8dc;
         }
 
         .metric-title {
             font-size: 0.9rem;
             font-weight: 600;
-            color: #0b4f6c;
+            color: #191970;
             margin-bottom: 15px;
         }
 
@@ -1069,7 +1285,7 @@ if (!empty($student_id_search)) {
             align-items: center;
             justify-content: space-between;
             padding: 8px 0;
-            border-bottom: 1px solid #e4f0f5;
+            border-bottom: 1px solid #eceff1;
         }
 
         .metric-item:last-child {
@@ -1077,13 +1293,13 @@ if (!empty($student_id_search)) {
         }
 
         .metric-label {
-            color: #2c5f6e;
+            color: #546e7a;
             font-size: 0.9rem;
         }
 
         .metric-value {
             font-weight: 600;
-            color: #0b4f6c;
+            color: #191970;
         }
 
         @keyframes fadeInUp {
@@ -1226,7 +1442,7 @@ if (!empty($student_id_search)) {
                         </form>
 
                         <?php if ($search_error): ?>
-                            <div style="margin-top: 15px; padding: 12px; background: #f8d7da; border-radius: 12px; color: #842029; font-size: 0.9rem;">
+                            <div style="margin-top: 15px; padding: 12px; background: #ffebee; border-radius: 12px; color: #c62828; font-size: 0.9rem;">
                                 <?php echo $search_error; ?>
                             </div>
                         <?php endif; ?>
@@ -1234,7 +1450,7 @@ if (!empty($student_id_search)) {
                         <!-- Upcoming Events -->
                         <?php if (!empty($upcoming_events)): ?>
                             <div style="margin-top: 24px;">
-                                <div style="font-size: 0.9rem; font-weight: 600; color: #0b4f6c; margin-bottom: 12px;">
+                                <div style="font-size: 0.9rem; font-weight: 600; color: #191970; margin-bottom: 12px;">
                                     📅 Upcoming Health Programs
                                 </div>
                                 <div class="event-list">
@@ -1282,7 +1498,7 @@ if (!empty($student_id_search)) {
                                             <span class="clearance-badge">Needs Clearance</span>
                                         </div>
                                         <?php if (!empty($event['expected_participants'])): ?>
-                                            <div style="font-size: 0.7rem; color: #2c5f6e; margin-top: 4px;">
+                                            <div style="font-size: 0.7rem; color: #546e7a; margin-top: 4px;">
                                                 👥 Expected: <?php echo $event['expected_participants']; ?> participants
                                             </div>
                                         <?php endif; ?>
@@ -1303,7 +1519,7 @@ if (!empty($student_id_search)) {
                         <!-- Health Metrics Preview -->
                         <?php if (!empty($health_metrics['data']['common_conditions'])): ?>
                             <div style="margin-top: 20px;">
-                                <div style="font-size: 0.9rem; font-weight: 600; color: #0b4f6c; margin-bottom: 12px;">
+                                <div style="font-size: 0.9rem; font-weight: 600; color: #191970; margin-bottom: 12px;">
                                     📊 Common Health Conditions
                                 </div>
                                 <div class="metric-list">
@@ -1335,10 +1551,10 @@ if (!empty($student_id_search)) {
                         <?php if (!empty($student_data['medical_conditions']) || !empty($student_data['allergies'])): ?>
                             <p style="margin-top: 8px;">
                                 <?php if (!empty($student_data['medical_conditions'])): ?>
-                                    <span class="badge-warning health-badge">⚕️ <?php echo htmlspecialchars($student_data['medical_conditions']); ?></span>
+                                    <span class="health-badge badge-warning">⚕️ <?php echo htmlspecialchars($student_data['medical_conditions']); ?></span>
                                 <?php endif; ?>
                                 <?php if (!empty($student_data['allergies'])): ?>
-                                    <span class="badge-danger health-badge" style="margin-left: 8px;">⚠️ Allergies: <?php echo htmlspecialchars($student_data['allergies']); ?></span>
+                                    <span class="health-badge badge-danger" style="margin-left: 8px;">⚠️ Allergies: <?php echo htmlspecialchars($student_data['allergies']); ?></span>
                                 <?php endif; ?>
                             </p>
                         <?php endif; ?>
@@ -1587,7 +1803,7 @@ if (!empty($student_id_search)) {
                                                     <td><strong><?php echo $record['bmi']; ?></strong></td>
                                                     <td>L: <?php echo $record['vision_left'] ?: 'N/A'; ?>, R: <?php echo $record['vision_right'] ?: 'N/A'; ?></td>
                                                     <td>
-                                                        <span class="health-badge badge-<?php echo $record['fit_for_school'] == 'Yes' ? 'success' : ($record['fit_for_school'] == 'With Restrictions' ? 'warning' : 'danger'); ?>">
+                                                        <span class="health-badge <?php echo $record['fit_for_school'] == 'Yes' ? 'badge-success' : ($record['fit_for_school'] == 'With Restrictions' ? 'badge-warning' : 'badge-danger'); ?>">
                                                             <?php echo $record['fit_for_school']; ?>
                                                         </span>
                                                     </td>
@@ -1842,7 +2058,7 @@ if (!empty($student_id_search)) {
                                                     </td>
                                                     <td><?php echo htmlspecialchars(substr($record['findings'] ?? '', 0, 30)) . '...'; ?></td>
                                                     <td>
-                                                        <span class="health-badge badge-<?php echo $record['cleared_for_participation'] == 'Yes' ? 'success' : ($record['cleared_for_participation'] == 'With Restrictions' ? 'warning' : 'danger'); ?>">
+                                                        <span class="health-badge <?php echo $record['cleared_for_participation'] == 'Yes' ? 'badge-success' : ($record['cleared_for_participation'] == 'With Restrictions' ? 'badge-warning' : 'badge-danger'); ?>">
                                                             <?php echo $record['cleared_for_participation']; ?>
                                                         </span>
                                                     </td>
@@ -1963,6 +2179,68 @@ if (!empty($student_id_search)) {
             </div>
         </div>
     </div>
+
+    <!-- Security Verification Modal -->
+    <?php if ($show_verification_modal && !empty($student_id_search)): ?>
+    <div class="modal-overlay" id="verificationModal">
+        <div class="modal-container">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+            </div>
+            <h2 class="modal-title">Secure Access Required</h2>
+            <p class="modal-subtitle">
+                You are accessing confidential health records for<br>
+                <strong>Student ID: <?php echo htmlspecialchars($student_id_search); ?></strong>
+            </p>
+            
+            <?php if (isset($verification_error)): ?>
+                <div class="modal-error">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <?php echo $verification_error; ?>
+                </div>
+            <?php endif; ?>
+            
+            <form method="POST" action="" class="modal-form">
+                <input type="hidden" name="student_id" value="<?php echo htmlspecialchars($student_id_search); ?>">
+                <div class="form-group">
+                    <label for="password">Enter Your Password to Continue</label>
+                    <input type="password" class="form-control" id="password" name="password" 
+                           placeholder="••••••••" required autofocus>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn secondary" onclick="cancelAccess()">Cancel</button>
+                    <button type="submit" name="verify_access" class="modal-btn primary">Verify & Access</button>
+                </div>
+            </form>
+            <p style="text-align: center; margin-top: 20px; font-size: 0.8rem; color: #546e7a;">
+                This helps us maintain confidentiality of student health records
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        // Prevent background scrolling when modal is open
+        document.body.style.overflow = 'hidden';
+        
+        function cancelAccess() {
+            window.location.href = window.location.pathname; // Redirect to same page without query string
+        }
+        
+        // Close modal when clicking outside
+        document.getElementById('verificationModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                cancelAccess();
+            }
+        });
+    </script>
+    <?php endif; ?>
 
     <script>
         // Sidebar toggle
