@@ -161,17 +161,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                             <span class="nav-count">14</span>
                         </a>
                     </li>
-                    <li class="nav-item <?php echo $current_page == 'admin_management.php' ? 'active' : ''; ?>">
-                        <a href="admin_management.php" class="nav-link">
-                            <div class="nav-icon-wrapper">
-                                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                    <path d="M20 21V19C20 16.7909 18.2091 15 16 15H8C5.79086 15 4 16.7909 4 19V21" stroke-linecap="round" stroke-linejoin="round"/>
-                                    <circle cx="12" cy="7" r="4" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <span class="nav-label">Admin Management</span>
-                        </a>
-                    </li>
+                  
                 </ul>
             </div>
 
@@ -181,19 +171,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                     <span>System Health</span>
                 </div>
                 <ul class="nav-menu">
-                    <li class="nav-item <?php echo $current_page == 'system_logs.php' ? 'active' : ''; ?>">
-                        <a href="system_logs.php" class="nav-link">
-                            <div class="nav-icon-wrapper">
-                                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                    <path d="M21 12C21 13.2 20.5 14.2 19.7 15.1C18.9 15.9 17.8 16.5 16.5 16.8C15.2 17.1 13.8 17.1 12.1 16.9" stroke-linecap="round" stroke-linejoin="round"/>
-                                    <path d="M9 17C7.5 16.5 6.2 15.7 5.1 14.9C4 14.1 3.3 13.1 3 12C2.7 10.9 3 9.8 3.7 8.8C4.4 7.8 5.4 7 6.7 6.4C8 5.8 9.4 5.5 11 5.5C12.6 5.5 14 5.8 15.3 6.4C16.6 7 17.6 7.8 18.3 8.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                    <path d="M15 13L19 9L22 13" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <span class="nav-label">System Logs</span>
-                            <span class="nav-badge urgent">Errors</span>
-                        </a>
-                    </li>
+                   
                     <li class="nav-item <?php echo $current_page == 'backup_restore.php' ? 'active' : ''; ?>">
                         <a href="backup_restore.php" class="nav-link">
                             <div class="nav-icon-wrapper">
