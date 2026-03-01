@@ -122,17 +122,7 @@ $initials = substr($initials, 0, 2);
                             <span class="nav-label">My Profile</span>
                         </a>
                     </li>
-                    <li class="nav-item <?php echo $current_page == 'change_password.php' ? 'active' : ''; ?>">
-                        <a href="change_password.php" class="nav-link">
-                            <div class="nav-icon-wrapper">
-                                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                                </svg>
-                            </div>
-                            <span class="nav-label">Change Password</span>
-                        </a>
-                    </li>
+                   
                 </ul>
             </div>
         </div>
