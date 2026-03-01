@@ -11,29 +11,28 @@ class StudentAuth {
         $this->db = $database->getConnection();
         $this->api = new StudentAPI();
         
-        // Ensure students table exists
+        // Ensure students table exists with correct structure
         $this->createStudentsTable();
     }
     
     private function createStudentsTable() {
         $query = "CREATE TABLE IF NOT EXISTS `students` (
             `id` int(11) NOT NULL AUTO_INCREMENT,
-            `student_id` varchar(50) NOT NULL,
-            `full_name` varchar(255) NOT NULL,
-            `section` varchar(100) DEFAULT NULL,
-            `year_level` varchar(50) DEFAULT NULL,
-            `semester` varchar(50) DEFAULT NULL,
-            `email` varchar(255) DEFAULT NULL,
-            `contact_no` varchar(50) DEFAULT NULL,
+            `student_id` varchar(20) NOT NULL,
+            `full_name` varchar(100) NOT NULL,
+            `section` varchar(50) DEFAULT NULL,
+            `year_level` varchar(20) DEFAULT NULL,
+            `semester` varchar(20) DEFAULT NULL,
+            `email` varchar(100) DEFAULT NULL,
+            `contact_no` varchar(20) DEFAULT NULL,
             `allergies` text DEFAULT NULL,
             `medical_conditions` text DEFAULT NULL,
-            `blood_type` varchar(10) DEFAULT NULL,
-            `emergency_contact` varchar(255) DEFAULT NULL,
-            `emergency_phone` varchar(50) DEFAULT NULL,
-            `emergency_email` varchar(255) DEFAULT NULL,
-            `password` varchar(255) NOT NULL DEFAULT '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
+            `blood_type` varchar(5) DEFAULT NULL,
+            `emergency_contact` varchar(100) DEFAULT NULL,
+            `emergency_phone` varchar(20) DEFAULT NULL,
+            `emergency_email` varchar(100) DEFAULT NULL,
+            `last_sync` timestamp NULL DEFAULT NULL,
             `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-            `updated_at` timestamp NULL DEFAULT NULL ON UPDATE current_timestamp(),
             PRIMARY KEY (`id`),
             UNIQUE KEY `student_id` (`student_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci";
@@ -46,49 +45,56 @@ class StudentAuth {
     }
     
     /**
-     * Quick login without full sync - much faster
+     * Quick login using student_id
      */
     public function quickLogin($student_id, $password) {
-        // Fast check - only query the database, don't sync
-        $query = "SELECT s.*, u.id as user_id, u.password as user_password, u.role, u.email 
-                  FROM students s 
-                  JOIN users u ON s.student_id = u.username 
-                  WHERE s.student_id = :student_id";
+        // First check if student exists in users table with role 'student'
+        $query = "SELECT u.*, s.*, u.id as user_id 
+                  FROM users u 
+                  LEFT JOIN students s ON u.student_id = s.student_id 
+                  WHERE u.student_id = :student_id AND u.role = 'student'";
         
         $stmt = $this->db->prepare($query);
         $stmt->bindParam(':student_id', $student_id);
         $stmt->execute();
         
         if ($stmt->rowCount() > 0) {
-            $student = $stmt->fetch(PDO::FETCH_ASSOC);
+            $user_data = $stmt->fetch(PDO::FETCH_ASSOC);
             
             // Verify password
-            if (password_verify($password, $student['user_password'])) {
+            if (password_verify($password, $user_data['password'])) {
+                
                 // Prepare student data for session
                 $student_data = [
-                    'id' => $student['id'],
-                    'student_id' => $student['student_id'],
-                    'full_name' => $student['full_name'],
-                    'section' => $student['section'],
-                    'year_level' => $student['year_level'],
-                    'semester' => $student['semester'],
-                    'email' => $student['email'],
-                    'contact_no' => $student['contact_no'],
-                    'allergies' => $student['allergies'],
-                    'medical_conditions' => $student['medical_conditions'],
-                    'blood_type' => $student['blood_type'],
-                    'emergency_contact' => $student['emergency_contact'],
-                    'emergency_phone' => $student['emergency_phone'],
-                    'emergency_email' => $student['emergency_email']
+                    'id' => $user_data['id'] ?? null,
+                    'student_id' => $user_data['student_id'],
+                    'full_name' => $user_data['full_name'],
+                    'section' => $user_data['section'] ?? null,
+                    'year_level' => $user_data['year_level'] ?? null,
+                    'semester' => $user_data['semester'] ?? null,
+                    'email' => $user_data['email'] ?? null,
+                    'contact_no' => $user_data['contact_no'] ?? null,
+                    'allergies' => $user_data['allergies'] ?? null,
+                    'medical_conditions' => $user_data['medical_conditions'] ?? null,
+                    'blood_type' => $user_data['blood_type'] ?? null,
+                    'emergency_contact' => $user_data['emergency_contact'] ?? null,
+                    'emergency_phone' => $user_data['emergency_phone'] ?? null,
+                    'emergency_email' => $user_data['emergency_email'] ?? null
                 ];
+                
+                // Update last login
+                $update_query = "UPDATE users SET last_login = NOW() WHERE id = :user_id";
+                $update_stmt = $this->db->prepare($update_query);
+                $update_stmt->bindParam(':user_id', $user_data['user_id']);
+                $update_stmt->execute();
                 
                 return [
                     'success' => true,
                     'user' => [
-                        'id' => $student['user_id'],
-                        'username' => $student['student_id'],
-                        'full_name' => $student['full_name'],
-                        'email' => $student['email'],
+                        'id' => $user_data['user_id'],
+                        'student_id' => $user_data['student_id'],
+                        'full_name' => $user_data['full_name'],
+                        'email' => $user_data['email'],
                         'role' => 'student'
                     ],
                     'student' => $student_data
@@ -98,18 +104,13 @@ class StudentAuth {
                 if ($password === '0000') {
                     // Update to hashed password
                     $hashed = password_hash('0000', PASSWORD_DEFAULT);
-                    $update_query = "UPDATE users SET password = :password WHERE username = :student_id";
+                    $update_query = "UPDATE users SET password = :password WHERE student_id = :student_id";
                     $update_stmt = $this->db->prepare($update_query);
                     $update_stmt->bindParam(':password', $hashed);
                     $update_stmt->bindParam(':student_id', $student_id);
+                    $update_stmt->execute();
                     
-                    try {
-                        $update_stmt->execute();
-                    } catch (PDOException $e) {
-                        error_log("Error updating password: " . $e->getMessage());
-                    }
-                    
-                    // Try again
+                    // Try login again
                     return $this->quickLogin($student_id, $password);
                 }
                 
@@ -119,12 +120,22 @@ class StudentAuth {
                 ];
             }
         } else {
-            // Student not found - try to sync just this one student
-            $synced = $this->syncSingleStudent($student_id);
+            // Student not found in users table - check if they exist in API
+            $student = $this->api->getStudentById($student_id);
             
-            if ($synced) {
-                // Try login again
-                return $this->quickLogin($student_id, $password);
+            if ($student) {
+                // Create user account for this student
+                $created = $this->createStudentUser($student);
+                
+                if ($created) {
+                    // Try login again
+                    return $this->quickLogin($student_id, $password);
+                } else {
+                    return [
+                        'success' => false,
+                        'message' => 'Error creating student account'
+                    ];
+                }
             }
             
             return [
@@ -135,69 +146,84 @@ class StudentAuth {
     }
     
     /**
-     * Sync only one student (faster than syncing all)
+     * Create a user account for a student
      */
-    public function syncSingleStudent($student_id) {
-        $student = $this->api->getStudentById($student_id);
-        
-        if ($student) {
-            $default_password = password_hash('0000', PASSWORD_DEFAULT);
+    private function createStudentUser($student_data) {
+        try {
+            // Start transaction
+            $this->db->beginTransaction();
             
-            // Check if student exists
+            // Check if student already exists in students table
             $check_query = "SELECT id FROM students WHERE student_id = :student_id";
             $check_stmt = $this->db->prepare($check_query);
-            $check_stmt->bindParam(':student_id', $student_id);
+            $check_stmt->bindParam(':student_id', $student_data['student_id']);
             $check_stmt->execute();
             
             if ($check_stmt->rowCount() == 0) {
-                // Insert new student
-                $query = "INSERT INTO students (
+                // Insert into students table
+                $student_query = "INSERT INTO students (
                     student_id, full_name, section, year_level, semester, 
                     email, contact_no, allergies, medical_conditions, blood_type,
-                    emergency_contact, emergency_phone, emergency_email, password
+                    emergency_contact, emergency_phone, emergency_email, last_sync
                 ) VALUES (
                     :student_id, :full_name, :section, :year_level, :semester,
                     :email, :contact_no, :allergies, :medical_conditions, :blood_type,
-                    :emergency_contact, :emergency_phone, :emergency_email, :password
+                    :emergency_contact, :emergency_phone, :emergency_email, NOW()
                 )";
                 
-                $stmt = $this->db->prepare($query);
-                $stmt->bindParam(':student_id', $student['student_id']);
-                $stmt->bindParam(':full_name', $student['full_name']);
-                $stmt->bindParam(':section', $student['section']);
-                $stmt->bindParam(':year_level', $student['year_level']);
-                $stmt->bindParam(':semester', $student['semester']);
-                $stmt->bindParam(':email', $student['email']);
-                $stmt->bindParam(':contact_no', $student['contact_no']);
-                $stmt->bindParam(':allergies', $student['allergies']);
-                $stmt->bindParam(':medical_conditions', $student['medical_conditions']);
-                $stmt->bindParam(':blood_type', $student['blood_type']);
-                $stmt->bindParam(':emergency_contact', $student['emergency_contact']);
-                $stmt->bindParam(':emergency_phone', $student['emergency_phone']);
-                $stmt->bindParam(':emergency_email', $student['emergency_email']);
-                $stmt->bindParam(':password', $default_password);
-                
-                try {
-                    $stmt->execute();
-                    
-                    // Create user
-                    $user_query = "INSERT INTO users (username, password, full_name, email, role) 
-                                   VALUES (:username, :password, :full_name, :email, 'student')";
-                    $user_stmt = $this->db->prepare($user_query);
-                    $user_stmt->bindParam(':username', $student['student_id']);
-                    $user_stmt->bindParam(':password', $default_password);
-                    $user_stmt->bindParam(':full_name', $student['full_name']);
-                    $user_stmt->bindParam(':email', $student['email']);
-                    $user_stmt->execute();
-                    
-                    return true;
-                } catch (PDOException $e) {
-                    error_log("Error syncing student: " . $e->getMessage());
-                }
+                $student_stmt = $this->db->prepare($student_query);
+                $student_stmt->bindParam(':student_id', $student_data['student_id']);
+                $student_stmt->bindParam(':full_name', $student_data['full_name']);
+                $student_stmt->bindParam(':section', $student_data['section']);
+                $student_stmt->bindParam(':year_level', $student_data['year_level']);
+                $student_stmt->bindParam(':semester', $student_data['semester']);
+                $student_stmt->bindParam(':email', $student_data['email']);
+                $student_stmt->bindParam(':contact_no', $student_data['contact_no']);
+                $student_stmt->bindParam(':allergies', $student_data['allergies']);
+                $student_stmt->bindParam(':medical_conditions', $student_data['medical_conditions']);
+                $student_stmt->bindParam(':blood_type', $student_data['blood_type']);
+                $student_stmt->bindParam(':emergency_contact', $student_data['emergency_contact']);
+                $student_stmt->bindParam(':emergency_phone', $student_data['emergency_phone']);
+                $student_stmt->bindParam(':emergency_email', $student_data['emergency_email']);
+                $student_stmt->execute();
             }
+            
+            // Check if user already exists
+            $check_user = "SELECT id FROM users WHERE student_id = :student_id OR username = :username";
+            $check_user_stmt = $this->db->prepare($check_user);
+            $check_user_stmt->bindParam(':student_id', $student_data['student_id']);
+            $check_user_stmt->bindParam(':username', $student_data['student_id']);
+            $check_user_stmt->execute();
+            
+            if ($check_user_stmt->rowCount() == 0) {
+                // Create user account
+                $default_password = password_hash('0000', PASSWORD_DEFAULT);
+                $username = $student_data['student_id'];
+                $email = $student_data['email'] ?? $student_data['student_id'] . '@student.bcps4core.com';
+                
+                $user_query = "INSERT INTO users (
+                    student_id, username, email, password, full_name, role, status
+                ) VALUES (
+                    :student_id, :username, :email, :password, :full_name, 'student', 'active'
+                )";
+                
+                $user_stmt = $this->db->prepare($user_query);
+                $user_stmt->bindParam(':student_id', $student_data['student_id']);
+                $user_stmt->bindParam(':username', $username);
+                $user_stmt->bindParam(':email', $email);
+                $user_stmt->bindParam(':password', $default_password);
+                $user_stmt->bindParam(':full_name', $student_data['full_name']);
+                $user_stmt->execute();
+            }
+            
+            $this->db->commit();
+            return true;
+            
+        } catch (PDOException $e) {
+            $this->db->rollBack();
+            error_log("Error creating student user: " . $e->getMessage());
+            return false;
         }
-        
-        return false;
     }
     
     /**
@@ -211,7 +237,25 @@ class StudentAuth {
      * Sync all students from API (for admin use)
      */
     public function syncAllStudents() {
-        return $this->api->syncAllStudents($this->db);
+        $students = $this->api->getAllStudents();
+        $synced = 0;
+        $errors = 0;
+        
+        foreach ($students as $student) {
+            $result = $this->createStudentUser($student);
+            if ($result) {
+                $synced++;
+            } else {
+                $errors++;
+            }
+        }
+        
+        return [
+            'success' => true,
+            'synced' => $synced,
+            'errors' => $errors,
+            'total' => count($students)
+        ];
     }
     
     /**
@@ -260,7 +304,7 @@ class StudentAuth {
      */
     public function getStudentByUserId($user_id) {
         $query = "SELECT s.* FROM students s 
-                  JOIN users u ON s.student_id = u.username 
+                  JOIN users u ON s.student_id = u.student_id 
                   WHERE u.id = :user_id";
         
         $stmt = $this->db->prepare($query);
@@ -283,7 +327,8 @@ class StudentAuth {
                   email = :email,
                   emergency_contact = :emergency_contact,
                   emergency_phone = :emergency_phone,
-                  emergency_email = :emergency_email
+                  emergency_email = :emergency_email,
+                  last_sync = NOW()
                   WHERE student_id = :student_id";
         
         $stmt = $this->db->prepare($query);
