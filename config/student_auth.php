@@ -30,7 +30,7 @@ class StudentAuth {
             `emergency_phone` varchar(50) DEFAULT NULL,
             `emergency_email` varchar(255) DEFAULT NULL,
             `password` varchar(255) NOT NULL DEFAULT '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
-                        `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+            `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
             `updated_at` timestamp NULL DEFAULT NULL ON UPDATE current_timestamp(),
             PRIMARY KEY (`id`),
             UNIQUE KEY `student_id` (`student_id`)
@@ -136,9 +136,9 @@ class StudentAuth {
             $default_password = password_hash('0000', PASSWORD_DEFAULT);
             
             $query = "INSERT INTO users (
-                username, password, full_name, email, role, status
+                username, password, full_name, email, role
             ) VALUES (
-                :username, :password, :full_name, :email, 'student', 'active'
+                :username, :password, :full_name, :email, 'student'
             )";
             
             $stmt = $this->db->prepare($query);
@@ -160,7 +160,7 @@ class StudentAuth {
         $query = "SELECT s.*, u.id as user_id, u.password as user_password, u.role 
                   FROM students s 
                   JOIN users u ON s.student_id = u.username 
-                  WHERE s.student_id = :student_id AND u.status = 'active'";
+                  WHERE s.student_id = :student_id";
         
         $stmt = $this->db->prepare($query);
         $stmt->bindParam(':student_id', $student_id);
@@ -171,11 +171,16 @@ class StudentAuth {
             
             // Verify password
             if (password_verify($password, $student['user_password'])) {
-                // Update last login
-                $update_query = "UPDATE users SET last_login = NOW() WHERE id = :user_id";
-                $update_stmt = $this->db->prepare($update_query);
-                $update_stmt->bindParam(':user_id', $student['user_id']);
-                $update_stmt->execute();
+                // Update last login if the column exists
+                try {
+                    $update_query = "UPDATE users SET last_login = NOW() WHERE id = :user_id";
+                    $update_stmt = $this->db->prepare($update_query);
+                    $update_stmt->bindParam(':user_id', $student['user_id']);
+                    $update_stmt->execute();
+                } catch (PDOException $e) {
+                    // Column might not exist, ignore
+                    error_log("Could not update last_login: " . $e->getMessage());
+                }
                 
                 // Prepare student data for session
                 $student_data = [
