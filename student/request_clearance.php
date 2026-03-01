@@ -384,19 +384,6 @@ foreach ($clearance_history as $clearance) {
             background: #cfd8dc;
         }
 
-        .btn-outline {
-            background: transparent;
-            border: 2px solid #191970;
-            color: #191970;
-            padding: 8px 16px;
-            font-size: 0.85rem;
-        }
-
-        .btn-outline:hover {
-            background: #191970;
-            color: white;
-        }
-
         .alert {
             padding: 16px 20px;
             border-radius: 12px;
@@ -592,7 +579,7 @@ foreach ($clearance_history as $clearance) {
             background: white;
             padding: 12px;
             border-radius: 10px;
-            margin-bottom: 16px;
+            margin-top: 12px;
             font-size: 0.9rem;
             color: #37474f;
             border: 1px dashed #cfd8dc;
@@ -603,46 +590,6 @@ foreach ($clearance_history as $clearance) {
             display: block;
             margin-bottom: 4px;
             font-size: 0.8rem;
-        }
-
-        .history-actions {
-            display: flex;
-            gap: 12px;
-            justify-content: flex-end;
-        }
-
-        .btn-pdf {
-            background: #d32f2f;
-            color: white;
-            padding: 8px 16px;
-            border-radius: 30px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            transition: all 0.3s ease;
-            border: none;
-            cursor: pointer;
-        }
-
-        .btn-pdf:hover {
-            background: #b71c1c;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(211, 47, 47, 0.3);
-        }
-
-        .btn-pdf svg {
-            width: 16px;
-            height: 16px;
-        }
-
-        .btn-pdf.disabled {
-            background: #cfd8dc;
-            color: #78909c;
-            pointer-events: none;
-            opacity: 0.7;
         }
 
         .empty-state {
@@ -887,7 +834,7 @@ foreach ($clearance_history as $clearance) {
                             <div class="info-icon">ℹ️</div>
                             <div class="info-content">
                                 <strong>About Medical Clearances</strong>
-                                <p>Clearance requests are typically processed within 24-48 hours. Once approved, you can download the PDF certificate from your history below.</p>
+                                <p>Clearance requests are typically processed within 24-48 hours. You can track the status of your requests in the history section below.</p>
                             </div>
                         </div>
                     </div>
@@ -947,12 +894,6 @@ foreach ($clearance_history as $clearance) {
                                                 <span class="detail-value approved-by"><?php echo htmlspecialchars($clearance['approved_by']); ?></span>
                                             </div>
                                             <?php endif; ?>
-                                            <?php if (!empty($clearance['valid_until'])): ?>
-                                            <div class="history-detail">
-                                                <span class="detail-label">Valid Until</span>
-                                                <span class="detail-value"><?php echo date('M d, Y', strtotime($clearance['valid_until'])); ?></span>
-                                            </div>
-                                            <?php endif; ?>
                                         </div>
 
                                         <div class="history-purpose">
@@ -961,37 +902,11 @@ foreach ($clearance_history as $clearance) {
                                         </div>
 
                                         <?php if (!empty($clearance['remarks'])): ?>
-                                        <div class="history-purpose" style="background: #fff3e0; border-color: #ffb74d;">
+                                        <div class="history-purpose" style="background: #fff3e0; border-color: #ffb74d; margin-top: 8px;">
                                             <strong>REMARKS:</strong>
                                             <?php echo htmlspecialchars($clearance['remarks']); ?>
                                         </div>
                                         <?php endif; ?>
-
-                                        <div class="history-actions">
-                                            <?php if ($clearance['status'] == 'Approved'): ?>
-                                                <a href="generate_clearance_pdf.php?code=<?php echo $clearance['clearance_code']; ?>" 
-                                                   class="btn-pdf" 
-                                                   target="_blank">
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                                        <polyline points="14 2 14 8 20 8"/>
-                                                        <line x1="12" y1="18" x2="12" y2="12"/>
-                                                        <line x1="9" y1="15" x2="15" y2="15"/>
-                                                    </svg>
-                                                    Download PDF
-                                                </a>
-                                            <?php else: ?>
-                                                <span class="btn-pdf disabled">
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                                        <polyline points="14 2 14 8 20 8"/>
-                                                        <line x1="12" y1="18" x2="12" y2="12"/>
-                                                        <line x1="9" y1="15" x2="15" y2="15"/>
-                                                    </svg>
-                                                    PDF Unavailable
-                                                </span>
-                                            <?php endif; ?>
-                                        </div>
                                     </div>
                                 <?php endforeach; ?>
                             <?php else: ?>
