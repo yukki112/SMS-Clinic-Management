@@ -58,6 +58,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['appointment_action'])
     $action = $_POST['appointment_action']; // 'approve' or 'reject'
     
     try {
+        // Start transaction
+        $db->beginTransaction();
+        
         // Get appointment details first
         $query = "SELECT a.*, p.student_id, p.full_name as patient_name 
                   FROM appointments a 
@@ -76,11 +79,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['appointment_action'])
                 $update_stmt->bindParam(':appointment_id', $appointment_id);
                 
                 if ($update_stmt->execute()) {
+                    // Create appointment history record
+                    $history_query = "INSERT INTO appointment_history (appointment_id, action, performed_by, notes) 
+                                      VALUES (:appointment_id, 'approved', :performed_by, 'Appointment approved')";
+                    $history_stmt = $db->prepare($history_query);
+                    $history_stmt->bindParam(':appointment_id', $appointment_id);
+                    $history_stmt->bindParam(':performed_by', $current_user_id);
+                    $history_stmt->execute();
+                    
+                    $db->commit();
                     $success_message = "Appointment #" . $appointment_id . " has been approved successfully!";
                     
                     // Log the approval
                     error_log("Appointment " . $appointment_id . " approved by user " . $current_user_id);
                 } else {
+                    $db->rollBack();
                     $error_message = "Error approving appointment.";
                 }
             } elseif ($action === 'reject') {
@@ -90,18 +103,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['appointment_action'])
                 $update_stmt->bindParam(':appointment_id', $appointment_id);
                 
                 if ($update_stmt->execute()) {
+                    // Create appointment history record
+                    $history_query = "INSERT INTO appointment_history (appointment_id, action, performed_by, notes) 
+                                      VALUES (:appointment_id, 'rejected', :performed_by, 'Appointment rejected')";
+                    $history_stmt = $db->prepare($history_query);
+                    $history_stmt->bindParam(':appointment_id', $appointment_id);
+                    $history_stmt->bindParam(':performed_by', $current_user_id);
+                    $history_stmt->execute();
+                    
+                    $db->commit();
                     $success_message = "Appointment #" . $appointment_id . " has been rejected.";
                     
                     // Log the rejection
                     error_log("Appointment " . $appointment_id . " rejected by user " . $current_user_id);
                 } else {
+                    $db->rollBack();
                     $error_message = "Error rejecting appointment.";
                 }
             }
         } else {
             $error_message = "Appointment not found.";
+            $db->rollBack();
         }
     } catch (PDOException $e) {
+        $db->rollBack();
         $error_message = "Database error: " . $e->getMessage();
         error_log("Error processing appointment: " . $e->getMessage());
     }
@@ -167,23 +192,21 @@ function fetchHealthMetrics() {
     return ['data' => []];
 }
 
-function fetchClearanceStatus($event_id) {
-    $api_url = "https://cps.qcprotektado.com/api/health_program.php?action=get_clearance_status&event_id=" . $event_id;
-    
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $api_url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    
-    $response = curl_exec($ch);
-    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    
-    if ($http_code == 200 && $response) {
-        return json_decode($response, true);
-    }
-    return null;
+// Create appointment history table if not exists
+try {
+    $db->exec("CREATE TABLE IF NOT EXISTS `appointment_history` (
+        `id` int(11) NOT NULL AUTO_INCREMENT,
+        `appointment_id` int(11) NOT NULL,
+        `action` enum('approved','rejected','completed','cancelled') NOT NULL,
+        `performed_by` int(11) NOT NULL,
+        `notes` text DEFAULT NULL,
+        `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+        PRIMARY KEY (`id`),
+        KEY `appointment_id` (`appointment_id`),
+        KEY `performed_by` (`performed_by`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
+} catch (PDOException $e) {
+    error_log("Error creating appointment_history table: " . $e->getMessage());
 }
 
 // Function to get pending appointments
@@ -193,14 +216,63 @@ function getPendingAppointments($db) {
                   FROM appointments a 
                   JOIN patients p ON a.patient_id = p.id 
                   LEFT JOIN users u ON a.doctor_id = u.id 
-                  WHERE a.status = 'scheduled' 
-                  ORDER BY a.appointment_date ASC, a.appointment_time ASC 
-                  LIMIT 20";
+                  WHERE a.status = 'scheduled' AND a.appointment_date >= CURDATE()
+                  ORDER BY a.appointment_date ASC, a.appointment_time ASC";
         $stmt = $db->prepare($query);
         $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         error_log("Error fetching appointments: " . $e->getMessage());
+        return [];
+    }
+}
+
+// Function to get appointment history
+function getAppointmentHistory($db, $limit = 20) {
+    try {
+        $query = "SELECT ah.*, a.appointment_date, a.appointment_time, p.full_name as patient_name, 
+                         p.student_id, u.full_name as performed_by_name
+                  FROM appointment_history ah
+                  JOIN appointments a ON ah.appointment_id = a.id
+                  JOIN patients p ON a.patient_id = p.id
+                  JOIN users u ON ah.performed_by = u.id
+                  ORDER BY ah.created_at DESC
+                  LIMIT :limit";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Error fetching appointment history: " . $e->getMessage());
+        return [];
+    }
+}
+
+// Function to get appointments by date
+function getAppointmentsByDate($db, $date) {
+    try {
+        $query = "SELECT a.*, p.student_id, p.full_name as patient_name, p.phone, u.full_name as doctor_name,
+                         ah.action as last_action, ah.created_at as action_date
+                  FROM appointments a 
+                  JOIN patients p ON a.patient_id = p.id 
+                  LEFT JOIN users u ON a.doctor_id = u.id 
+                  LEFT JOIN (
+                      SELECT appointment_id, action, created_at
+                      FROM appointment_history ah1
+                      WHERE created_at = (
+                          SELECT MAX(created_at)
+                          FROM appointment_history ah2
+                          WHERE ah2.appointment_id = ah1.appointment_id
+                      )
+                  ) ah ON a.id = ah.appointment_id
+                  WHERE a.appointment_date = :appointment_date
+                  ORDER BY a.appointment_time ASC";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':appointment_date', $date);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Error fetching appointments by date: " . $e->getMessage());
         return [];
     }
 }
@@ -211,7 +283,7 @@ function getAppointmentStats($db) {
         $stats = [];
         
         // Total pending
-        $query = "SELECT COUNT(*) as total FROM appointments WHERE status = 'scheduled'";
+        $query = "SELECT COUNT(*) as total FROM appointments WHERE status = 'scheduled' AND appointment_date >= CURDATE()";
         $stmt = $db->query($query);
         $stats['pending'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
         
@@ -225,10 +297,20 @@ function getAppointmentStats($db) {
         $stmt = $db->query($query);
         $stats['week'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
         
+        // Get appointment counts for calendar (next 30 days)
+        $query = "SELECT appointment_date, COUNT(*) as count 
+                  FROM appointments 
+                  WHERE appointment_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+                  AND status = 'scheduled'
+                  GROUP BY appointment_date
+                  ORDER BY appointment_date";
+        $stmt = $db->query($query);
+        $stats['calendar'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
         return $stats;
     } catch (PDOException $e) {
         error_log("Error fetching appointment stats: " . $e->getMessage());
-        return ['pending' => 0, 'today' => 0, 'week' => 0];
+        return ['pending' => 0, 'today' => 0, 'week' => 0, 'calendar' => []];
     }
 }
 
@@ -483,6 +565,14 @@ $health_metrics = fetchHealthMetrics();
 // Get appointment data
 $pending_appointments = getPendingAppointments($db);
 $appointment_stats = getAppointmentStats($db);
+$appointment_history = getAppointmentHistory($db);
+
+// Get selected date appointments for modal
+$selected_date = isset($_GET['view_date']) ? $_GET['view_date'] : '';
+$date_appointments = [];
+if (!empty($selected_date)) {
+    $date_appointments = getAppointmentsByDate($db, $selected_date);
+}
 
 // Get local records
 function getVaccinationRecords($db, $student_id = null) {
@@ -620,6 +710,35 @@ if (!empty($student_id_search) && isset($_SESSION['verified_student_id_health'])
 if (empty($student_id_search) && isset($_SESSION['verified_student_id_health'])) {
     unset($_SESSION['verified_student_id_health']);
 }
+
+// Generate calendar for next 30 days
+function generateCalendar($appointment_stats) {
+    $calendar = [];
+    $start_date = new DateTime();
+    $end_date = new DateTime('+30 days');
+    $interval = new DateInterval('P1D');
+    $period = new DatePeriod($start_date, $interval, $end_date);
+    
+    // Create lookup array for appointment counts
+    $count_lookup = [];
+    foreach ($appointment_stats['calendar'] as $item) {
+        $count_lookup[$item['appointment_date']] = $item['count'];
+    }
+    
+    foreach ($period as $date) {
+        $date_str = $date->format('Y-m-d');
+        $calendar[] = [
+            'date' => $date_str,
+            'display' => $date->format('M d'),
+            'day' => $date->format('D'),
+            'count' => isset($count_lookup[$date_str]) ? $count_lookup[$date_str] : 0
+        ];
+    }
+    
+    return $calendar;
+}
+
+$calendar_days = generateCalendar($appointment_stats);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -697,18 +816,24 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             bottom: 0;
             background: rgba(0, 0, 0, 0.5);
             backdrop-filter: blur(5px);
-            display: flex;
+            display: none;
             align-items: center;
             justify-content: center;
             z-index: 9999;
             animation: fadeIn 0.3s ease;
         }
 
+        .modal-overlay.active {
+            display: flex;
+        }
+
         .modal-container {
             background: white;
             border-radius: 16px;
             width: 90%;
-            max-width: 450px;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
             padding: 30px;
             box-shadow: 0 8px 16px rgba(25, 25, 112, 0.2);
             animation: slideUp 0.3s ease;
@@ -914,6 +1039,93 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             font-weight: 600;
             display: inline-block;
             margin-top: 4px;
+        }
+
+        /* Calendar Grid */
+        .calendar-section {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #cfd8dc;
+            animation: fadeInUp 0.65s ease;
+        }
+
+        .calendar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .calendar-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #191970;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .calendar-title svg {
+            width: 24px;
+            height: 24px;
+            color: #191970;
+        }
+
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 10px;
+        }
+
+        .calendar-day-header {
+            text-align: center;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #78909c;
+            text-transform: uppercase;
+            padding: 8px;
+        }
+
+        .calendar-day {
+            background: #f8f9fa;
+            border: 1px solid #cfd8dc;
+            border-radius: 12px;
+            padding: 12px;
+            min-height: 80px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .calendar-day:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.1);
+            border-color: #191970;
+        }
+
+        .calendar-day.has-appointment {
+            background: #e8f5e9;
+            border-color: #2e7d32;
+        }
+
+        .calendar-day-number {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #191970;
+            margin-bottom: 5px;
+        }
+
+        .calendar-day-count {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #191970;
+            color: white;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
         }
 
         /* Alert Messages */
@@ -1358,6 +1570,21 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             color: #856404;
         }
 
+        .appointment-status.approved {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .appointment-status.rejected {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .appointment-status.completed {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+
         .appointment-body {
             display: grid;
             grid-template-columns: 2fr 1fr 1fr;
@@ -1465,6 +1692,29 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             background: #f5f5f5;
         }
 
+        .history-action {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .history-action.approved {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .history-action.rejected {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .history-action.completed {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+
         .empty-state {
             text-align: center;
             padding: 50px 20px;
@@ -1565,6 +1815,10 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             .appointment-body {
                 grid-template-columns: 1fr;
             }
+            
+            .calendar-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
         }
 
         @media (max-width: 768px) {
@@ -1589,6 +1843,10 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             
             .appointment-actions {
                 flex-direction: column;
+            }
+            
+            .calendar-grid {
+                grid-template-columns: repeat(2, 1fr);
             }
         }
     </style>
@@ -1701,6 +1959,50 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                     </div>
                 </div>
 
+                <!-- Calendar Section -->
+                <div class="calendar-section">
+                    <div class="calendar-header">
+                        <div class="calendar-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                                <line x1="16" y1="2" x2="16" y2="6"/>
+                                <line x1="8" y1="2" x2="8" y2="6"/>
+                                <line x1="3" y1="10" x2="21" y2="10"/>
+                            </svg>
+                            Appointment Calendar (Next 30 Days)
+                        </div>
+                        <span class="event-badge">Click on a date to view appointments</span>
+                    </div>
+                    
+                    <div class="calendar-grid">
+                        <div class="calendar-day-header">Mon</div>
+                        <div class="calendar-day-header">Tue</div>
+                        <div class="calendar-day-header">Wed</div>
+                        <div class="calendar-day-header">Thu</div>
+                        <div class="calendar-day-header">Fri</div>
+                        <div class="calendar-day-header">Sat</div>
+                        <div class="calendar-day-header">Sun</div>
+                        
+                        <?php 
+                        $start_day = (new DateTime())->format('N'); // 1 (Monday) to 7 (Sunday)
+                        // Add empty cells for days before today
+                        for ($i = 1; $i < $start_day; $i++): 
+                        ?>
+                            <div class="calendar-day" style="background: transparent; border: none; box-shadow: none;"></div>
+                        <?php endfor; ?>
+                        
+                        <?php foreach ($calendar_days as $day): ?>
+                            <div class="calendar-day <?php echo $day['count'] > 0 ? 'has-appointment' : ''; ?>" 
+                                 onclick="viewDateAppointments('<?php echo $day['date']; ?>', '<?php echo $day['display']; ?>')">
+                                <div class="calendar-day-number"><?php echo date('j', strtotime($day['date'])); ?></div>
+                                <?php if ($day['count'] > 0): ?>
+                                    <span class="calendar-day-count"><?php echo $day['count']; ?> appointment<?php echo $day['count'] > 1 ? 's' : ''; ?></span>
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
                 <!-- Pending Appointments Section -->
                 <?php if (!empty($pending_appointments)): ?>
                 <div class="tabs-section" style="margin-bottom: 30px;">
@@ -1759,6 +2061,50 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                     </div>
                                 </div>
                             <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+                <!-- Appointment History Section -->
+                <?php if (!empty($appointment_history)): ?>
+                <div class="tabs-section" style="margin-bottom: 30px;">
+                    <div class="tabs-header">
+                        <button class="tab-btn active">📜 Appointment History</button>
+                    </div>
+                    <div class="tab-content">
+                        <div class="tab-pane active">
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date/Time</th>
+                                            <th>Student</th>
+                                            <th>Action</th>
+                                            <th>Performed By</th>
+                                            <th>Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($appointment_history as $history): ?>
+                                            <tr>
+                                                <td><?php echo date('M d, Y h:i A', strtotime($history['created_at'])); ?></td>
+                                                <td>
+                                                    <strong><?php echo htmlspecialchars($history['patient_name']); ?></strong>
+                                                    <br><small><?php echo htmlspecialchars($history['student_id']); ?></small>
+                                                </td>
+                                                <td>
+                                                    <span class="history-action <?php echo $history['action']; ?>">
+                                                        <?php echo ucfirst($history['action']); ?>
+                                                    </span>
+                                                </td>
+                                                <td><?php echo htmlspecialchars($history['performed_by_name']); ?></td>
+                                                <td><?php echo htmlspecialchars($history['notes'] ?: 'N/A'); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2527,7 +2873,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
 
     <!-- Security Verification Modal -->
     <?php if ($show_verification_modal && !empty($student_id_search)): ?>
-    <div class="modal-overlay" id="verificationModal">
+    <div class="modal-overlay active" id="verificationModal">
         <div class="modal-container">
             <div class="modal-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2586,6 +2932,30 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
         });
     </script>
     <?php endif; ?>
+
+    <!-- Date Appointments Modal -->
+    <div class="modal-overlay" id="dateAppointmentsModal">
+        <div class="modal-container" style="max-width: 800px;">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+            </div>
+            <h2 class="modal-title" id="modalDateTitle">Appointments for </h2>
+            <p class="modal-subtitle" id="modalDateCount">Loading appointments...</p>
+            
+            <div id="appointmentsList" class="appointment-list" style="max-height: 400px; overflow-y: auto;">
+                <!-- Appointments will be loaded here via JavaScript -->
+            </div>
+            
+            <div class="modal-actions">
+                <button type="button" class="modal-btn secondary" onclick="closeDateModal()">Close</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         // Sidebar toggle
@@ -2657,6 +3027,102 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
         if (pageTitle) {
             pageTitle.textContent = 'Health Programs';
         }
+
+        // Date appointments modal function
+        function viewDateAppointments(date, displayDate) {
+            document.getElementById('modalDateTitle').textContent = 'Appointments for ' + displayDate;
+            
+            // Show loading state
+            document.getElementById('appointmentsList').innerHTML = '<div class="empty-state"><p>Loading appointments...</p></div>';
+            document.getElementById('dateAppointmentsModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+            
+            // Fetch appointments for this date via AJAX
+            fetch(window.location.pathname + '?view_date=' + date + '&ajax=1')
+                .then(response => response.json())
+                .then(data => {
+                    const appointmentsList = document.getElementById('appointmentsList');
+                    const modalDateCount = document.getElementById('modalDateCount');
+                    
+                    if (data.success && data.appointments.length > 0) {
+                        modalDateCount.textContent = data.appointments.length + ' appointment(s) found';
+                        
+                        let html = '';
+                        data.appointments.forEach(app => {
+                            const statusClass = app.status === 'scheduled' ? 'approved' : 
+                                               app.status === 'cancelled' ? 'rejected' : 
+                                               app.status === 'completed' ? 'completed' : '';
+                            
+                            html += `
+                                <div class="appointment-card">
+                                    <div class="appointment-header">
+                                        <span class="appointment-id">Appointment #${app.id}</span>
+                                        <span class="appointment-status ${statusClass}">${app.status}</span>
+                                    </div>
+                                    <div class="appointment-body">
+                                        <div class="appointment-info">
+                                            <span class="info-label">Student</span>
+                                            <span class="info-value"><strong>${escapeHtml(app.patient_name)}</strong> (${escapeHtml(app.student_id)})</span>
+                                            <span class="info-label" style="margin-top: 5px;">Contact</span>
+                                            <span class="info-value">${escapeHtml(app.phone || 'N/A')}</span>
+                                        </div>
+                                        <div class="appointment-info">
+                                            <span class="info-label">Time</span>
+                                            <span class="info-value"><strong>${app.appointment_time ? new Date('1970-01-01T' + app.appointment_time).toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'}) : 'N/A'}</strong></span>
+                                            <span class="info-label" style="margin-top: 5px;">Staff</span>
+                                            <span class="info-value">${app.doctor_name ? 'Dr. ' + escapeHtml(app.doctor_name) : 'Any available'}</span>
+                                        </div>
+                                        <div class="appointment-info">
+                                            <span class="info-label">Reason</span>
+                                            <span class="info-value">${escapeHtml(app.reason || 'N/A')}</span>
+                                            <span class="info-label" style="margin-top: 5px;">Last Action</span>
+                                            <span class="info-value">${app.last_action ? escapeHtml(app.last_action) : 'Pending'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        appointmentsList.innerHTML = html;
+                    } else {
+                        modalDateCount.textContent = 'No appointments found';
+                        appointmentsList.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg><p>No appointments scheduled for this date</p></div>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching appointments:', error);
+                    document.getElementById('appointmentsList').innerHTML = '<div class="empty-state"><p>Error loading appointments</p></div>';
+                });
+        }
+
+        function closeDateModal() {
+            document.getElementById('dateAppointmentsModal').classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        // Helper function to escape HTML
+        function escapeHtml(unsafe) {
+            if (!unsafe) return '';
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('dateAppointmentsModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeDateModal();
+            }
+        });
+
+        // Handle escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && document.getElementById('dateAppointmentsModal').classList.contains('active')) {
+                closeDateModal();
+            }
+        });
     </script>
 </body>
 </html>
