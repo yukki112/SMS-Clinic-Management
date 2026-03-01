@@ -31,22 +31,22 @@ function sendAppointmentEmail($student_email, $student_name, $appointment_date, 
     try {
         // Server settings
         $mail->isSMTP();
-        $mail->Host       = 'smtp.gmail.com'; // or your SMTP server
+        $mail->Host       = 'smtp.gmail.com';
         $mail->SMTPAuth   = true;
-        $mail->Username = 'Stephenviray12@gmail.com';
-        $mail->Password = 'bubr nckn tgqf lvus';
+        $mail->Username   = 'stephenviray12@gmail.com'; // Replace with your email
+        $mail->Password   = 'your-app-password'; // Replace with your app password
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
 
         // Recipients
-        $mail->setFrom('your-email@gmail.com', 'School Clinic');
+        $mail->setFrom('stephenviray12@gmail.com', 'School Clinic');
         $mail->addAddress($student_email, $student_name);
 
         // Content
         $mail->isHTML(true);
         
         if ($status == 'approved') {
-            $mail->Subject = 'Appointment Approved - School Clinic';
+            $mail->Subject = '✅ Appointment Approved - School Clinic';
             $mail->Body = "
                 <div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;'>
                     <div style='background: #191970; color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;'>
@@ -82,7 +82,7 @@ function sendAppointmentEmail($student_email, $student_name, $appointment_date, 
                 </div>
             ";
         } else {
-            $mail->Subject = 'Appointment Rejected - School Clinic';
+            $mail->Subject = '❌ Appointment Rejected - School Clinic';
             $mail->Body = "
                 <div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;'>
                     <div style='background: #c62828; color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;'>
@@ -176,8 +176,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['appointment_action'])
         $appointment = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if ($appointment) {
-            $new_status = ($action === 'approve') ? 'scheduled' : 'cancelled';
-            $action_type = ($action === 'approve') ? 'approved' : 'rejected';
+            // Set new status based on action
+            if ($action === 'approve') {
+                $new_status = 'scheduled'; // Approved
+                $action_type = 'approved';
+            } else {
+                $new_status = 'cancelled'; // Rejected
+                $action_type = 'rejected';
+            }
             
             // Update appointment status
             $update_query = "UPDATE appointments SET status = :status WHERE id = :appointment_id";
@@ -310,27 +316,29 @@ function fetchHealthMetrics() {
     return ['data' => []];
 }
 
-function fetchClearanceStatus($event_id) {
-    $api_url = "https://cps.qcprotektado.com/api/health_program.php?action=get_clearance_status&event_id=" . $event_id;
-    
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $api_url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    
-    $response = curl_exec($ch);
-    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    
-    if ($http_code == 200 && $response) {
-        return json_decode($response, true);
+// Function to get pending appointments (status = 'pending' means waiting for approval)
+function getPendingAppointments($db) {
+    try {
+        $query = "SELECT a.*, p.student_id, p.full_name as patient_name, p.phone, u.full_name as doctor_name,
+                  s.email as student_email
+                  FROM appointments a 
+                  JOIN patients p ON a.patient_id = p.id 
+                  LEFT JOIN users u ON a.doctor_id = u.id 
+                  LEFT JOIN students s ON p.student_id = s.student_id
+                  WHERE a.status = 'pending' 
+                  ORDER BY a.created_at ASC 
+                  LIMIT 50";
+        $stmt = $db->prepare($query);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Error fetching pending appointments: " . $e->getMessage());
+        return [];
     }
-    return null;
 }
 
-// Function to get pending appointments (status = 'scheduled' means approved)
-function getPendingAppointments($db) {
+// Function to get approved appointments (status = 'scheduled')
+function getApprovedAppointments($db) {
     try {
         $query = "SELECT a.*, p.student_id, p.full_name as patient_name, p.phone, u.full_name as doctor_name,
                   s.email as student_email
@@ -345,7 +353,7 @@ function getPendingAppointments($db) {
         $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
-        error_log("Error fetching appointments: " . $e->getMessage());
+        error_log("Error fetching approved appointments: " . $e->getMessage());
         return [];
     }
 }
@@ -354,7 +362,7 @@ function getPendingAppointments($db) {
 function getAppointmentHistory($db) {
     try {
         $query = "SELECT ah.*, a.appointment_date, a.appointment_time, p.student_id, p.full_name as patient_name,
-                  u.username as performed_by_name, p.email as patient_email
+                  u.username as performed_by_name, p.email as patient_email, a.status
                   FROM appointment_history ah
                   JOIN appointments a ON ah.appointment_id = a.id
                   JOIN patients p ON a.patient_id = p.id
@@ -401,6 +409,7 @@ function getCalendarData($db, $month, $year) {
                     appointment_date,
                     COUNT(*) as total,
                     SUM(CASE WHEN status = 'scheduled' THEN 1 ELSE 0 END) as approved,
+                    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
                     SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
                     SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
                   FROM appointments 
@@ -429,17 +438,22 @@ function getAppointmentStats($db) {
         $stats = [];
         
         // Total pending (waiting for approval)
-        $query = "SELECT COUNT(*) as total FROM appointments WHERE status = 'scheduled'";
+        $query = "SELECT COUNT(*) as total FROM appointments WHERE status = 'pending'";
         $stmt = $db->query($query);
         $stats['pending'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
         
+        // Total approved
+        $query = "SELECT COUNT(*) as total FROM appointments WHERE status = 'scheduled'";
+        $stmt = $db->query($query);
+        $stats['approved'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+        
         // Today's appointments
-        $query = "SELECT COUNT(*) as total FROM appointments WHERE appointment_date = CURDATE()";
+        $query = "SELECT COUNT(*) as total FROM appointments WHERE appointment_date = CURDATE() AND status = 'scheduled'";
         $stmt = $db->query($query);
         $stats['today'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
         
         // This week's appointments
-        $query = "SELECT COUNT(*) as total FROM appointments WHERE appointment_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)";
+        $query = "SELECT COUNT(*) as total FROM appointments WHERE appointment_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY) AND status = 'scheduled'";
         $stmt = $db->query($query);
         $stats['week'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
         
@@ -452,14 +466,14 @@ function getAppointmentStats($db) {
         $stmt = $db->query($query);
         $history_stats = $stmt->fetch(PDO::FETCH_ASSOC);
         
-        $stats['approved'] = $history_stats['total_approved'] ?? 0;
-        $stats['rejected'] = $history_stats['total_rejected'] ?? 0;
+        $stats['total_approved'] = $history_stats['total_approved'] ?? 0;
+        $stats['total_rejected'] = $history_stats['total_rejected'] ?? 0;
         $stats['completed'] = $history_stats['total_completed'] ?? 0;
         
         return $stats;
     } catch (PDOException $e) {
         error_log("Error fetching appointment stats: " . $e->getMessage());
-        return ['pending' => 0, 'today' => 0, 'week' => 0, 'approved' => 0, 'rejected' => 0, 'completed' => 0];
+        return ['pending' => 0, 'approved' => 0, 'today' => 0, 'week' => 0, 'total_approved' => 0, 'total_rejected' => 0, 'completed' => 0];
     }
 }
 
@@ -748,6 +762,7 @@ $health_metrics = fetchHealthMetrics();
 
 // Get appointment data
 $pending_appointments = getPendingAppointments($db);
+$approved_appointments = getApprovedAppointments($db);
 $appointment_history = getAppointmentHistory($db);
 $appointment_stats = getAppointmentStats($db);
 
@@ -1603,8 +1618,6 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             font-size: 0.7rem;
             padding: 2px 4px;
             border-radius: 4px;
-            background: #e8f5e9;
-            color: #2e7d32;
             display: flex;
             justify-content: space-between;
         }
@@ -1612,6 +1625,11 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
         .event-indicator.approved {
             background: #e8f5e9;
             color: #2e7d32;
+        }
+
+        .event-indicator.pending {
+            background: #fff3cd;
+            color: #856404;
         }
 
         .event-indicator.cancelled {
@@ -1713,6 +1731,11 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             border-radius: 4px;
             font-size: 0.7rem;
             font-weight: 600;
+        }
+
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
         }
 
         .status-approved {
@@ -1922,8 +1945,16 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             border-radius: 20px;
             font-size: 0.8rem;
             font-weight: 600;
+        }
+
+        .status-pending-badge {
             background: #fff3cd;
             color: #856404;
+        }
+
+        .status-approved-badge {
+            background: #e8f5e9;
+            color: #2e7d32;
         }
 
         .appointment-body {
@@ -2171,7 +2202,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             <div class="dashboard-container">
                 <div class="welcome-section">
                     <h1>🏥 School Health Programs Monitoring</h1>
-                    <p>Track vaccination records, physical exams, deworming, and health screenings. Manage and approve student appointment requests. Students will receive email notifications for approved appointments.</p>
+                    <p>Track vaccination records, physical exams, deworming, and health screenings. Manage and approve student appointment requests. Students will receive email notifications for approved/rejected appointments.</p>
                 </div>
 
                 <!-- Alert Messages -->
@@ -2234,10 +2265,21 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                 <!-- Appointment Stats Cards -->
                 <div class="stats-grid" style="margin-top: 20px;">
                     <div class="stat-card">
-                        <div class="stat-icon">📅</div>
+                        <div class="stat-icon">⏳</div>
                         <div class="stat-info">
                             <h3><?php echo $appointment_stats['pending']; ?></h3>
-                            <p>Approved Appointments</p>
+                            <p>Pending Approval</p>
+                            <?php if ($appointment_stats['pending'] > 0): ?>
+                                <span class="warning-badge">Action needed</span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-info">
+                            <h3><?php echo $appointment_stats['approved']; ?></h3>
+                            <p>Approved</p>
                         </div>
                     </div>
 
@@ -2250,18 +2292,10 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                     </div>
 
                     <div class="stat-card">
-                        <div class="stat-icon">🗓️</div>
+                        <div class="stat-icon">📊</div>
                         <div class="stat-info">
-                            <h3><?php echo $appointment_stats['week']; ?></h3>
-                            <p>This Week</p>
-                        </div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon">✅</div>
-                        <div class="stat-info">
-                            <h3><?php echo $appointment_stats['approved']; ?> / <?php echo $appointment_stats['rejected']; ?></h3>
-                            <p>Approved/Rejected</p>
+                            <h3><?php echo $appointment_stats['total_approved']; ?> / <?php echo $appointment_stats['total_rejected']; ?></h3>
+                            <p>Total Approved/Rejected</p>
                         </div>
                     </div>
                 </div>
@@ -2269,20 +2303,21 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                 <!-- Main Tabs: Appointments, Calendar, History -->
                 <div class="tabs-section">
                     <div class="tabs-header">
-                        <button class="tab-btn <?php echo !isset($_GET['tab']) || $_GET['tab'] == 'appointments' ? 'active' : ''; ?>" onclick="window.location.href='?tab=appointments<?php echo !empty($student_id_search) ? '&student_id=' . urlencode($student_id_search) : ''; ?>'">📋 Appointments</button>
+                        <button class="tab-btn <?php echo !isset($_GET['tab']) || $_GET['tab'] == 'pending' ? 'active' : ''; ?>" onclick="window.location.href='?tab=pending<?php echo !empty($student_id_search) ? '&student_id=' . urlencode($student_id_search) : ''; ?>'">⏳ Pending Approval (<?php echo $appointment_stats['pending']; ?>)</button>
+                        <button class="tab-btn <?php echo isset($_GET['tab']) && $_GET['tab'] == 'approved' ? 'active' : ''; ?>" onclick="window.location.href='?tab=approved<?php echo !empty($student_id_search) ? '&student_id=' . urlencode($student_id_search) : ''; ?>'">✅ Approved</button>
                         <button class="tab-btn <?php echo isset($_GET['tab']) && $_GET['tab'] == 'calendar' ? 'active' : ''; ?>" onclick="window.location.href='?tab=calendar<?php echo !empty($student_id_search) ? '&student_id=' . urlencode($student_id_search) : ''; ?>'">📅 Calendar View</button>
                         <button class="tab-btn <?php echo isset($_GET['tab']) && $_GET['tab'] == 'history' ? 'active' : ''; ?>" onclick="window.location.href='?tab=history<?php echo !empty($student_id_search) ? '&student_id=' . urlencode($student_id_search) : ''; ?>'">📜 History</button>
                     </div>
 
                     <div class="tab-content">
-                        <!-- Appointments Tab -->
-                        <div class="tab-pane <?php echo !isset($_GET['tab']) || $_GET['tab'] == 'appointments' ? 'active' : ''; ?>" id="appointments-tab">
+                        <!-- Pending Appointments Tab -->
+                        <div class="tab-pane <?php echo !isset($_GET['tab']) || $_GET['tab'] == 'pending' ? 'active' : ''; ?>" id="pending-tab">
                             <?php if (!empty($pending_appointments)): ?>
                                 <?php foreach ($pending_appointments as $appointment): ?>
                                     <div class="appointment-card">
                                         <div class="appointment-header">
                                             <span class="appointment-id">Appointment #<?php echo $appointment['id']; ?></span>
-                                            <span class="appointment-status">Approved</span>
+                                            <span class="appointment-status status-pending-badge">Pending Approval</span>
                                         </div>
                                         <div class="appointment-body">
                                             <div class="appointment-info">
@@ -2304,7 +2339,69 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                                 <span class="info-label">Reason</span>
                                                 <span class="info-value"><?php echo htmlspecialchars($appointment['reason']); ?></span>
                                                 <span class="info-label" style="margin-top: 5px;">Requested On</span>
-                                                <span class="info-value"><?php echo date('M d, Y', strtotime($appointment['created_at'])); ?></span>
+                                                <span class="info-value"><?php echo date('M d, Y h:i A', strtotime($appointment['created_at'])); ?></span>
+                                            </div>
+                                        </div>
+                                        <div class="appointment-actions">
+                                            <form method="POST" action="" style="display: inline;" onsubmit="return confirm('Approve this appointment? An email notification will be sent to the student.');">
+                                                <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
+                                                <input type="hidden" name="appointment_action" value="approve">
+                                                <button type="submit" class="action-btn approve">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                                        <path d="M20 6L9 17L4 12"/>
+                                                    </svg>
+                                                    Approve & Notify
+                                                </button>
+                                            </form>
+                                            <form method="POST" action="" style="display: inline;" onsubmit="return confirm('Reject this appointment? An email notification will be sent to the student.');">
+                                                <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
+                                                <input type="hidden" name="appointment_action" value="reject">
+                                                <button type="submit" class="action-btn reject">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                                        <path d="M18 6L6 18M6 6L18 18"/>
+                                                    </svg>
+                                                    Reject & Notify
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <div class="empty-state">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <circle cx="12" cy="12" r="10"/>
+                                        <path d="M12 8v4M12 16h.01"/>
+                                    </svg>
+                                    <p>No pending appointments found</p>
+                                    <small>New appointment requests will appear here</small>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <!-- Approved Appointments Tab -->
+                        <div class="tab-pane <?php echo isset($_GET['tab']) && $_GET['tab'] == 'approved' ? 'active' : ''; ?>" id="approved-tab">
+                            <?php if (!empty($approved_appointments)): ?>
+                                <?php foreach ($approved_appointments as $appointment): ?>
+                                    <div class="appointment-card">
+                                        <div class="appointment-header">
+                                            <span class="appointment-id">Appointment #<?php echo $appointment['id']; ?></span>
+                                            <span class="appointment-status status-approved-badge">Approved</span>
+                                        </div>
+                                        <div class="appointment-body">
+                                            <div class="appointment-info">
+                                                <span class="info-label">Student</span>
+                                                <span class="info-value"><strong><?php echo htmlspecialchars($appointment['patient_name']); ?></strong> (<?php echo htmlspecialchars($appointment['student_id']); ?>)</span>
+                                                <?php if (!empty($appointment['student_email'])): ?>
+                                                    <span class="info-value" style="font-size: 0.8rem;">📧 <?php echo htmlspecialchars($appointment['student_email']); ?></span>
+                                                <?php endif; ?>
+                                            </div>
+                                            <div class="appointment-info">
+                                                <span class="info-label">Date & Time</span>
+                                                <span class="info-value"><strong><?php echo date('M d, Y', strtotime($appointment['appointment_date'])); ?></strong> at <?php echo date('h:i A', strtotime($appointment['appointment_time'])); ?></span>
+                                            </div>
+                                            <div class="appointment-info">
+                                                <span class="info-label">Reason</span>
+                                                <span class="info-value"><?php echo htmlspecialchars($appointment['reason']); ?></span>
                                             </div>
                                         </div>
                                     </div>
@@ -2367,13 +2464,13 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                                     <?php if ($day_data['approved'] > 0): ?>
                                                         <div class="event-indicator approved">
                                                             <span>✓</span>
-                                                            <span><?php echo $day_data['approved']; ?></span>
+                                                            <span><?php echo $day_data['approved']; ?> approved</span>
                                                         </div>
                                                     <?php endif; ?>
-                                                    <?php if ($day_data['completed'] > 0): ?>
-                                                        <div class="event-indicator completed">
-                                                            <span>✓</span>
-                                                            <span><?php echo $day_data['completed']; ?></span>
+                                                    <?php if ($day_data['pending'] > 0): ?>
+                                                        <div class="event-indicator pending">
+                                                            <span>⏳</span>
+                                                            <span><?php echo $day_data['pending']; ?> pending</span>
                                                         </div>
                                                     <?php endif; ?>
                                                 </div>
@@ -2398,7 +2495,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                         <div class="appointment-list-item">
                                             <div class="appointment-list-header">
                                                 <span class="appointment-list-time"><?php echo date('h:i A', strtotime($appointment['appointment_time'])); ?></span>
-                                                <span class="appointment-list-status status-<?php echo $appointment['status'] == 'scheduled' ? 'approved' : ($appointment['status'] == 'cancelled' ? 'cancelled' : 'completed'); ?>">
+                                                <span class="appointment-list-status status-<?php echo $appointment['status']; ?>">
                                                     <?php echo ucfirst($appointment['status']); ?>
                                                 </span>
                                             </div>
@@ -2408,7 +2505,6 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                                     <p style="font-size: 0.8rem;">📧 <?php echo htmlspecialchars($appointment['student_email']); ?></p>
                                                 <?php endif; ?>
                                                 <p>Reason: <?php echo htmlspecialchars($appointment['reason']); ?></p>
-                                                <p>Doctor: <?php echo $appointment['doctor_name'] ? 'Dr. ' . htmlspecialchars($appointment['doctor_name']) : 'Any available'; ?></p>
                                             </div>
                                         </div>
                                     <?php endforeach; ?>
@@ -2428,7 +2524,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                                 <th>Student</th>
                                                 <th>Appointment</th>
                                                 <th>Performed By</th>
-                                                <th>Email Status</th>
+                                                <th>Status</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -2443,17 +2539,18 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                                     <td>
                                                         <strong><?php echo htmlspecialchars($history['patient_name']); ?></strong><br>
                                                         <small><?php echo htmlspecialchars($history['student_id']); ?></small>
+                                                        <?php if (!empty($history['patient_email'])): ?>
+                                                            <br><small style="color: #2e7d32;">📧 Notification sent</small>
+                                                        <?php endif; ?>
                                                     </td>
                                                     <td>
                                                         <?php echo date('M d', strtotime($history['appointment_date'])); ?> at <?php echo date('h:i A', strtotime($history['appointment_time'])); ?>
                                                     </td>
                                                     <td><?php echo htmlspecialchars($history['performed_by_name']); ?></td>
                                                     <td>
-                                                        <?php if (!empty($history['patient_email'])): ?>
-                                                            <span style="color: #2e7d32;">📧 Notification sent</span>
-                                                        <?php else: ?>
-                                                            <span style="color: #c62828;">⚠️ No email</span>
-                                                        <?php endif; ?>
+                                                        <span class="status-<?php echo $history['status']; ?>">
+                                                            <?php echo ucfirst($history['status']); ?>
+                                                        </span>
                                                     </td>
                                                 </tr>
                                             <?php endforeach; ?>
@@ -2487,7 +2584,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                         </div>
                         
                         <form method="GET" action="" class="search-form">
-                            <input type="hidden" name="tab" value="<?php echo isset($_GET['tab']) ? $_GET['tab'] : 'appointments'; ?>">
+                            <input type="hidden" name="tab" value="<?php echo isset($_GET['tab']) ? $_GET['tab'] : 'pending'; ?>">
                             <div class="form-group">
                                 <label for="student_id">Student ID</label>
                                 <input type="text" class="form-control" id="student_id" name="student_id" 
