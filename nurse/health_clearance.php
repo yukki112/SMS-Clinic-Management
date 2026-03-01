@@ -3,6 +3,10 @@ session_start();
 require_once '../config/database.php';
 require_once '../vendor/autoload.php';
 
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+use PHPMailer\PHPMailer\SMTP;
+
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
     header('Location: ../login.php');
@@ -17,7 +21,7 @@ $current_user_id = $_SESSION['user_id'];
 $current_user_name = $_SESSION['username'] ?? 'Clinic Staff';
 
 // Get current user full name from database
-$user_query = "SELECT full_name FROM users WHERE id = :user_id";
+$user_query = "SELECT full_name, email FROM users WHERE id = :user_id";
 $user_stmt = $db->prepare($user_query);
 $user_stmt->bindParam(':user_id', $current_user_id);
 $user_stmt->execute();
@@ -32,6 +36,173 @@ $success_message = '';
 $error_message = '';
 $generated_pdf = '';
 $show_verification_modal = false;
+
+// Email configuration
+function sendClearanceApprovalEmail($student_email, $student_name, $clearance_code, $clearance_type) {
+    $mail = new PHPMailer(true);
+    
+    try {
+        // Server settings
+        $mail->SMTPDebug = 0;                      // Enable verbose debug output (set to 0 for production)
+        $mail->isSMTP();                            // Send using SMTP
+        $mail->Host       = 'smtp.gmail.com';       // Set the SMTP server to send through
+        $mail->SMTPAuth   = true;                   // Enable SMTP authentication
+        $mail->Username   = 'stephenviray12@gmail.com';
+        $mail->Password = 'bubr nckn tgqf lvus';    // SMTP password (use app password for Gmail)
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS; // Enable TLS encryption
+        $mail->Port       = 587;                    // TCP port to connect to
+        
+        // Recipients
+        $mail->setFrom('clinic@school.edu', 'School Clinic');
+        $mail->addAddress($student_email, $student_name); // Add a recipient
+        
+        // Content
+        $mail->isHTML(true);                         // Set email format to HTML
+        $mail->Subject = 'Health Clearance Approved - ' . $clearance_code;
+        
+        // Email body
+        $mail->Body = "
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: #191970; color: white; padding: 20px; text-align: center; }
+                .content { padding: 20px; background: #f9f9f9; }
+                .clearance-code { 
+                    background: #e8f5e9; 
+                    padding: 15px; 
+                    text-align: center; 
+                    font-size: 24px; 
+                    font-weight: bold; 
+                    color: #191970;
+                    margin: 20px 0;
+                }
+                .footer { 
+                    background: #eceff1; 
+                    padding: 15px; 
+                    text-align: center; 
+                    font-size: 12px; 
+                    color: #546e7a; 
+                }
+                .btn {
+                    display: inline-block;
+                    padding: 10px 20px;
+                    background: #191970;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 5px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class='container'>
+                <div class='header'>
+                    <h2>Health Clearance Approved</h2>
+                </div>
+                <div class='content'>
+                    <p>Dear <strong>{$student_name}</strong>,</p>
+                    
+                    <p>We are pleased to inform you that your health clearance request has been <strong style='color: #2e7d32;'>APPROVED</strong>.</p>
+                    
+                    <div class='clearance-code'>
+                        Clearance Code: {$clearance_code}
+                    </div>
+                    
+                    <p><strong>Clearance Type:</strong> {$clearance_type}</p>
+                    
+                    <p>Please proceed to the School Clinic to claim your official clearance document. 
+                    Bring your student ID and this email as reference.</p>
+                    
+                    <p><strong>Clinic Location:</strong> School Clinic, Ground Floor</p>
+                    <p><strong>Clinic Hours:</strong> Monday - Friday, 8:00 AM - 5:00 PM</p>
+                    
+                    <p style='margin-top: 30px;'>
+                        <a href='#' class='btn'>View Clearance Details</a>
+                    </p>
+                    
+                    <p><small>This is an automated message. Please do not reply to this email.</small></p>
+                </div>
+                <div class='footer'>
+                    &copy; " . date('Y') . " School Clinic. All rights reserved.
+                </div>
+            </div>
+        </body>
+        </html>
+        ";
+        
+        // Plain text alternative
+        $mail->AltBody = "Dear {$student_name},\n\nYour health clearance request (Code: {$clearance_code}) has been APPROVED.\n\nPlease proceed to the School Clinic to claim your official clearance document. Bring your student ID for verification.\n\nClinic Location: School Clinic, Ground Floor\nClinic Hours: Monday-Friday, 8:00 AM - 5:00 PM\n\nThis is an automated message. Please do not reply.";
+        
+        $mail->send();
+        return true;
+    } catch (Exception $e) {
+        error_log("Email could not be sent. Error: {$mail->ErrorInfo}");
+        return false;
+    }
+}
+
+// Function to get student email from API or database
+function getStudentEmail($student_id, $db) {
+    // First check if we have email in our local database
+    $query = "SELECT email FROM students WHERE student_id = :student_id";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':student_id', $student_id);
+    $stmt->execute();
+    
+    if ($stmt->rowCount() > 0) {
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result['email'];
+    }
+    
+    // If not in local DB, try to fetch from API
+    $api_url = "https://ttm.qcprotektado.com/api/students.php";
+    
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $api_url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    if ($http_code == 200 && $response) {
+        $api_response = json_decode($response, true);
+        
+        if (isset($api_response['records']) && is_array($api_response['records'])) {
+            foreach ($api_response['records'] as $student) {
+                if (isset($student['student_id']) && $student['student_id'] == $student_id) {
+                    // If API has email, save it to our database for future use
+                    if (isset($student['email']) && !empty($student['email'])) {
+                        // Save to local database
+                        $insert_query = "INSERT INTO students (student_id, full_name, email, year_level, section) 
+                                         VALUES (:student_id, :full_name, :email, :year_level, :section)
+                                         ON DUPLICATE KEY UPDATE 
+                                         full_name = VALUES(full_name),
+                                         email = VALUES(email),
+                                         year_level = VALUES(year_level),
+                                         section = VALUES(section)";
+                        $insert_stmt = $db->prepare($insert_query);
+                        $insert_stmt->bindParam(':student_id', $student['student_id']);
+                        $insert_stmt->bindParam(':full_name', $student['full_name']);
+                        $insert_stmt->bindParam(':email', $student['email']);
+                        $insert_stmt->bindParam(':year_level', $student['year_level']);
+                        $insert_stmt->bindParam(':section', $student['section']);
+                        $insert_stmt->execute();
+                        
+                        return $student['email'];
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    
+    return null;
+}
 
 // Check if verification was completed
 if (isset($_SESSION['verified_student_id_clearance']) && $_SESSION['verified_student_id_clearance'] === $student_id_search) {
@@ -110,57 +281,112 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         }
     }
     
-    // APPROVE clearance request
-if ($_POST['action'] == 'approve_clearance') {
-    try {
-        $clearance_id = $_POST['clearance_id'];
-        $approved_date = date('Y-m-d');
-        
-        $query = "UPDATE clearance_requests 
-                  SET status = 'Approved', 
-                      approved_date = :approved_date, 
-                      approved_by = :approved_by
-                  WHERE id = :id";
-        
-        $stmt = $db->prepare($query);
-        $stmt->bindParam(':approved_date', $approved_date);
-        $stmt->bindParam(':approved_by', $current_user_fullname);
-        $stmt->bindParam(':id', $clearance_id);
-        
-        if ($stmt->execute()) {
-            $success_message = "Clearance approved successfully! PDF is now available.";
-        } else {
-            $error_message = "Error approving clearance.";
+    // APPROVE clearance request with email notification
+    if ($_POST['action'] == 'approve_clearance') {
+        try {
+            $clearance_id = $_POST['clearance_id'];
+            $approved_date = date('Y-m-d');
+            
+            // First get clearance details for email
+            $get_query = "SELECT * FROM clearance_requests WHERE id = :id";
+            $get_stmt = $db->prepare($get_query);
+            $get_stmt->bindParam(':id', $clearance_id);
+            $get_stmt->execute();
+            $clearance = $get_stmt->fetch(PDO::FETCH_ASSOC);
+            
+            $query = "UPDATE clearance_requests 
+                      SET status = 'Approved', 
+                          approved_date = :approved_date, 
+                          approved_by = :approved_by
+                      WHERE id = :id";
+            
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':approved_date', $approved_date);
+            $stmt->bindParam(':approved_by', $current_user_fullname);
+            $stmt->bindParam(':id', $clearance_id);
+            
+            if ($stmt->execute()) {
+                $success_message = "Clearance approved successfully! PDF is now available.";
+                
+                // Send email notification to student
+                if ($clearance) {
+                    $student_email = getStudentEmail($clearance['student_id'], $db);
+                    
+                    if ($student_email) {
+                        $email_sent = sendClearanceApprovalEmail(
+                            $student_email,
+                            $clearance['student_name'],
+                            $clearance['clearance_code'],
+                            $clearance['clearance_type']
+                        );
+                        
+                        if ($email_sent) {
+                            $success_message .= " Notification email sent to student.";
+                            
+                            // Log the notification
+                            $log_query = "INSERT INTO email_notifications (clearance_id, student_id, email, sent_date, status) 
+                                          VALUES (:clearance_id, :student_id, :email, NOW(), 'Sent')";
+                            $log_stmt = $db->prepare($log_query);
+                            $log_stmt->bindParam(':clearance_id', $clearance_id);
+                            $log_stmt->bindParam(':student_id', $clearance['student_id']);
+                            $log_stmt->bindParam(':email', $student_email);
+                            $log_stmt->execute();
+                        } else {
+                            $success_message .= " Note: Failed to send email notification.";
+                            
+                            // Log the failure
+                            $log_query = "INSERT INTO email_notifications (clearance_id, student_id, email, sent_date, status, error_message) 
+                                          VALUES (:clearance_id, :student_id, :email, NOW(), 'Failed', 'Email sending failed')";
+                            $log_stmt = $db->prepare($log_query);
+                            $log_stmt->bindParam(':clearance_id', $clearance_id);
+                            $log_stmt->bindParam(':student_id', $clearance['student_id']);
+                            $log_stmt->bindParam(':email', $student_email);
+                            $log_stmt->execute();
+                        }
+                    } else {
+                        $success_message .= " Note: Student email not found. No notification sent.";
+                        
+                        // Log missing email
+                        $log_query = "INSERT INTO email_notifications (clearance_id, student_id, email, sent_date, status, error_message) 
+                                      VALUES (:clearance_id, :student_id, NULL, NOW(), 'Failed', 'Student email not found')";
+                        $log_stmt = $db->prepare($log_query);
+                        $log_stmt->bindParam(':clearance_id', $clearance_id);
+                        $log_stmt->bindParam(':student_id', $clearance['student_id']);
+                        $log_stmt->execute();
+                    }
+                }
+            } else {
+                $error_message = "Error approving clearance.";
+            }
+        } catch (PDOException $e) {
+            $error_message = "Database error: " . $e->getMessage();
         }
-    } catch (PDOException $e) {
-        $error_message = "Database error: " . $e->getMessage();
     }
-}
 
-// DECLINE clearance request
-if ($_POST['action'] == 'decline_clearance') {
-    try {
-        $clearance_id = $_POST['clearance_id'];
-        $remarks = $_POST['decline_remarks'] ?? 'Request declined';
-        
-        $query = "UPDATE clearance_requests 
-                  SET status = 'Not Cleared', 
-                      remarks = :remarks
-                  WHERE id = :id";
-        
-        $stmt = $db->prepare($query);
-        $stmt->bindParam(':remarks', $remarks);
-        $stmt->bindParam(':id', $clearance_id);
-        
-        if ($stmt->execute()) {
-            $success_message = "Clearance request declined.";
-        } else {
-            $error_message = "Error declining clearance.";
+    // DECLINE clearance request
+    if ($_POST['action'] == 'decline_clearance') {
+        try {
+            $clearance_id = $_POST['clearance_id'];
+            $remarks = $_POST['decline_remarks'] ?? 'Request declined';
+            
+            $query = "UPDATE clearance_requests 
+                      SET status = 'Not Cleared', 
+                          remarks = :remarks
+                      WHERE id = :id";
+            
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':remarks', $remarks);
+            $stmt->bindParam(':id', $clearance_id);
+            
+            if ($stmt->execute()) {
+                $success_message = "Clearance request declined.";
+            } else {
+                $error_message = "Error declining clearance.";
+            }
+        } catch (PDOException $e) {
+            $error_message = "Database error: " . $e->getMessage();
         }
-    } catch (PDOException $e) {
-        $error_message = "Database error: " . $e->getMessage();
     }
-}
     
     // Issue medical certificate
     if ($_POST['action'] == 'issue_certificate') {
@@ -421,6 +647,25 @@ if (!empty($student_id_search) && isset($_SESSION['verified_student_id_clearance
                     $student_data = $student;
                     $found = true;
                     
+                    // Check if student has email and save to local DB
+                    if (isset($student['email']) && !empty($student['email'])) {
+                        // Save/update student email in local database
+                        $insert_query = "INSERT INTO students (student_id, full_name, email, year_level, section) 
+                                         VALUES (:student_id, :full_name, :email, :year_level, :section)
+                                         ON DUPLICATE KEY UPDATE 
+                                         full_name = VALUES(full_name),
+                                         email = VALUES(email),
+                                         year_level = VALUES(year_level),
+                                         section = VALUES(section)";
+                        $insert_stmt = $db->prepare($insert_query);
+                        $insert_stmt->bindParam(':student_id', $student['student_id']);
+                        $insert_stmt->bindParam(':full_name', $student['full_name']);
+                        $insert_stmt->bindParam(':email', $student['email']);
+                        $insert_stmt->bindParam(':year_level', $student['year_level']);
+                        $insert_stmt->bindParam(':section', $student['section']);
+                        $insert_stmt->execute();
+                    }
+                    
                     // Get student's clearance history
                     $student_data['clearances'] = getClearanceRequests($db);
                     $student_data['certificates'] = getMedicalCertificates($db, $student_id_search);
@@ -658,6 +903,30 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_clearance'
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+
+        .email-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 2px 8px;
+            border-radius: 30px;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+
+        .email-sent-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 2px 8px;
+            border-radius: 30px;
+            font-size: 0.65rem;
+            font-weight: 600;
         }
 
         @keyframes fadeIn {
@@ -1415,7 +1684,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_clearance'
             <div class="dashboard-container">
                 <div class="welcome-section">
                     <h1>📋 Health Clearance & Certification</h1>
-                    <p>Manage clearance requests, approve/decline, and issue certificates.</p>
+                    <p>Manage clearance requests, approve/decline, and issue certificates. Students receive email notifications upon approval.</p>
                 </div>
 
                 <!-- Alert Messages -->
@@ -1683,7 +1952,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_clearance'
                                             <line x1="12" y1="8" x2="12" y2="12"/>
                                             <line x1="12" y1="16" x2="12.01" y2="16"/>
                                         </svg>
-                                        <span>Clearance will be created as PENDING and requires approval before issuance.</span>
+                                        <span>Clearance will be created as PENDING and requires approval before issuance. Student will receive email notification upon approval.</span>
                                     </div>
                                     
                                     <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Submit Clearance Request</button>
@@ -1915,6 +2184,16 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_clearance'
                                                                     </svg>
                                                                     PDF
                                                                 </a>
+                                                                <?php
+                                                                // Check if notification was sent
+                                                                $notif_query = "SELECT * FROM email_notifications WHERE clearance_id = :cid AND status = 'Sent'";
+                                                                $notif_stmt = $db->prepare($notif_query);
+                                                                $notif_stmt->bindParam(':cid', $clearance['id']);
+                                                                $notif_stmt->execute();
+                                                                if ($notif_stmt->rowCount() > 0) {
+                                                                    echo '<span class="email-sent-badge">✉️ Email Sent</span>';
+                                                                }
+                                                                ?>
                                                             <?php elseif ($clearance['status'] == 'Pending'): ?>
                                                                 <span style="color: #856404; font-size: 0.7rem;">Awaiting approval</span>
                                                             <?php endif; ?>
@@ -2094,7 +2373,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_clearance'
                                                 <td>
                                                     <div class="action-icons">
                                                         <!-- Approve Button -->
-                                                        <form method="POST" action="" style="display: inline;" onsubmit="return confirm('Approve this clearance request? PDF will be generated.');">
+                                                        <form method="POST" action="" style="display: inline;" onsubmit="return confirm('Approve this clearance request? Student will receive an email notification to claim it in the clinic.');">
                                                             <input type="hidden" name="action" value="approve_clearance">
                                                             <input type="hidden" name="clearance_id" value="<?php echo $clearance['id']; ?>">
                                                             <button type="submit" class="action-icon approve" title="Approve">
@@ -2142,6 +2421,13 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_clearance'
                                     </tbody>
                                 </table>
                             </div>
+                            
+                            <div class="info-box" style="margin-top: 20px;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                                </svg>
+                                <span>When you approve a clearance, the student will receive an email notification to claim it at the clinic.</span>
+                            </div>
                         </div>
 
                         <!-- Approved Clearances Tab -->
@@ -2157,6 +2443,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_clearance'
                                             <th>Purpose</th>
                                             <th>Valid Until</th>
                                             <th>Approved By</th>
+                                            <th>Notification</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
@@ -2173,6 +2460,25 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_clearance'
                                                 <td><?php echo htmlspecialchars(substr($clearance['purpose'], 0, 30)) . '...'; ?></td>
                                                 <td><?php echo !empty($clearance['valid_until']) ? date('M d, Y', strtotime($clearance['valid_until'])) : 'No expiry'; ?></td>
                                                 <td><?php echo htmlspecialchars($clearance['approved_by'] ?: 'N/A'); ?></td>
+                                                <td>
+                                                    <?php
+                                                    $notif_query = "SELECT * FROM email_notifications WHERE clearance_id = :cid ORDER BY sent_date DESC LIMIT 1";
+                                                    $notif_stmt = $db->prepare($notif_query);
+                                                    $notif_stmt->bindParam(':cid', $clearance['id']);
+                                                    $notif_stmt->execute();
+                                                    $notif = $notif_stmt->fetch(PDO::FETCH_ASSOC);
+                                                    
+                                                    if ($notif) {
+                                                        if ($notif['status'] == 'Sent') {
+                                                            echo '<span class="email-sent-badge">✅ Sent ' . date('M d', strtotime($notif['sent_date'])) . '</span>';
+                                                        } else {
+                                                            echo '<span class="email-badge">❌ Failed</span>';
+                                                        }
+                                                    } else {
+                                                        echo '<span class="email-badge">⏳ No email</span>';
+                                                    }
+                                                    ?>
+                                                </td>
                                                 <td>
                                                     <a href="generate_clearance.php?id=<?php echo $clearance['id']; ?>" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration: none; padding: 4px 8px;">📄 PDF</a>
                                                 </td>
