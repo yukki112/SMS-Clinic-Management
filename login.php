@@ -2,6 +2,7 @@
 session_start();
 require_once 'config/database.php';
 require_once 'config/student_auth.php';
+require_once 'config/otp_helper.php';
 
 // Redirect if already logged in
 if (isset($_SESSION['user_id'])) {
@@ -26,6 +27,9 @@ if (isset($_SESSION['user_id'])) {
 
 $error = '';
 $studentAuth = new StudentAuth();
+$database = new Database();
+$db = $database->getConnection();
+$otpHelper = new OTPHelper($db);
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $student_id = trim($_POST['student_id']);
@@ -34,26 +38,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (empty($student_id) || empty($password)) {
         $error = 'Please enter student ID and password';
     } else {
-        // First try student login
-        $result = $studentAuth->login($student_id, $password);
+        // First try student login (fast check without full sync)
+        $result = $studentAuth->quickLogin($student_id, $password);
         
         if ($result['success']) {
-            $_SESSION['user_id'] = $result['user']['id'];
-            $_SESSION['username'] = $result['user']['username'];
-            $_SESSION['full_name'] = $result['user']['full_name'];
-            $_SESSION['role'] = $result['user']['role'];
-            $_SESSION['student_id'] = $result['student']['student_id'];
-            $_SESSION['student_data'] = $result['student'];
+            // Student found - proceed to OTP verification
+            $_SESSION['otp_user_id'] = $result['user']['id'];
+            $_SESSION['otp_username'] = $result['user']['username'];
+            $_SESSION['otp_full_name'] = $result['user']['full_name'];
+            $_SESSION['otp_email'] = $result['user']['email'];
+            $_SESSION['otp_role'] = $result['user']['role'];
             
-            header('Location: student/dashboard.php');
+            // Generate and send OTP
+            $otp = $otpHelper->generateOTP($result['user']['id'], $result['user']['email']);
+            $otpHelper->sendOTPEmail($result['user']['email'], $result['user']['full_name'], $otp);
+            
+            header('Location: verify-otp.php');
             exit();
         } else {
             // If not student, try staff/admin login
             try {
-                $database = new Database();
-                $db = $database->getConnection();
-                
-                $query = "SELECT * FROM users WHERE username = :username OR email = :email";
+                $query = "SELECT * FROM users WHERE (username = :username OR email = :email) AND role != 'student'";
                 $stmt = $db->prepare($query);
                 $stmt->bindParam(':username', $student_id);
                 $stmt->bindParam(':email', $student_id);
@@ -63,21 +68,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $user = $stmt->fetch(PDO::FETCH_ASSOC);
                     
                     if (password_verify($password, $user['password'])) {
-                        $_SESSION['user_id'] = $user['id'];
-                        $_SESSION['username'] = $user['username'];
-                        $_SESSION['full_name'] = $user['full_name'];
-                        $_SESSION['role'] = $user['role'];
+                        // Staff/Admin found - proceed to OTP verification
+                        $_SESSION['otp_user_id'] = $user['id'];
+                        $_SESSION['otp_username'] = $user['username'];
+                        $_SESSION['otp_full_name'] = $user['full_name'];
+                        $_SESSION['otp_email'] = $user['email'];
+                        $_SESSION['otp_role'] = $user['role'];
                         
-                        // Redirect based on role
-                        if ($user['role'] === 'superadmin') {
-                            header('Location: superadmin/dashboard.php');
-                        } elseif ($user['role'] === 'admin' || $user['role'] === 'staff') {
-                            header('Location: admin/dashboard.php');
-                        } elseif ($user['role'] === 'nurse') {
-                            header('Location: nurse/dashboard.php');
-                        } else {
-                            header('Location: admin/dashboard.php');
-                        }
+                        // Generate and send OTP
+                        $otp = $otpHelper->generateOTP($user['id'], $user['email']);
+                        $otpHelper->sendOTPEmail($user['email'], $user['full_name'], $otp);
+                        
+                        header('Location: verify-otp.php');
                         exit();
                     } else {
                         $error = 'Invalid password';
@@ -103,12 +105,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        /* Same styles as before - keeping it compact */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
             background-color: #ECEFF1;
@@ -120,7 +118,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             position: relative;
             overflow-x: hidden;
         }
-
         .bg-shape {
             position: absolute;
             width: 500px;
@@ -133,7 +130,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             animation: slowDrift 28s infinite alternate;
             z-index: 0;
         }
-
         .bg-shape-two {
             width: 350px;
             height: 350px;
@@ -146,17 +142,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             animation: slowDrift2 22s infinite alternate-reverse;
             z-index: 0;
         }
-
         @keyframes slowDrift {
             0% { transform: translate(0, 0) rotate(0deg); }
             100% { transform: translate(-60px, -30px) rotate(12deg); }
         }
-
         @keyframes slowDrift2 {
             0% { transform: translate(0, 0) rotate(0deg); }
             100% { transform: translate(50px, 30px) rotate(-18deg); }
         }
-
         .auth-container {
             width: 100%;
             max-width: 480px;
@@ -164,7 +157,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             position: relative;
             z-index: 10;
         }
-
         .auth-card {
             background: rgba(255, 255, 255, 0.85);
             backdrop-filter: blur(16px);
@@ -175,11 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             border: 1px solid rgba(25, 25, 112, 0.2);
             transition: transform 0.3s ease;
         }
-
-        .auth-card:hover {
-            transform: scale(1.01);
-        }
-
+        .auth-card:hover { transform: scale(1.01); }
         .logo-wrapper {
             display: flex;
             align-items: center;
@@ -187,7 +175,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             gap: 0.6rem;
             margin-bottom: 1.8rem;
         }
-
         .logo-img {
             width: 56px;
             height: 56px;
@@ -195,51 +182,33 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             object-fit: contain;
             filter: drop-shadow(0 6px 12px rgba(25,25,112,0.2));
         }
-
         .logo-text {
             font-size: 2.4rem;
             font-weight: 800;
             color: #191970;
             letter-spacing: -0.02em;
         }
-
         .logo-text span {
             font-weight: 400;
             font-size: 1.9rem;
             opacity: 0.8;
         }
-
         .auth-header {
             text-align: center;
             margin-bottom: 2.5rem;
         }
-
         .auth-header h2 {
             font-size: 2.2rem;
             font-weight: 700;
             color: #191970;
             margin-bottom: 0.4rem;
         }
-
         .auth-header p {
             color: #191970;
             opacity: 0.7;
             font-size: 1rem;
             font-weight: 500;
         }
-
-        .role-badge {
-            background: rgba(25, 25, 112, 0.1);
-            padding: 0.5rem 1.5rem;
-            border-radius: 60px;
-            display: inline-block;
-            margin-bottom: 1rem;
-            font-weight: 600;
-            font-size: 0.9rem;
-            color: #191970;
-            border: 1px solid rgba(25, 25, 112, 0.2);
-        }
-
         .alert {
             padding: 1.1rem 1.5rem;
             border-radius: 100px;
@@ -252,48 +221,38 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             border: 1px solid transparent;
             background: white;
         }
-
         .alert-error {
             background: #ffebee;
             color: #b71c1c;
             border-color: #ffcdd2;
         }
-
         .alert-success {
             background: #e8f5e9;
             color: #1b5e20;
             border-color: #c8e6c9;
         }
-
-        .alert i {
-            font-size: 1.3rem;
-        }
-
+        .alert i { font-size: 1.3rem; }
         .auth-form {
             display: flex;
             flex-direction: column;
             gap: 1.8rem;
         }
-
         .form-group {
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
         }
-
         .form-group label {
             font-size: 0.95rem;
             font-weight: 600;
             color: #191970;
             margin-left: 0.5rem;
         }
-
         .input-wrapper {
             position: relative;
             display: flex;
             align-items: center;
         }
-
         .input-wrapper i {
             position: absolute;
             left: 1.4rem;
@@ -302,7 +261,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             opacity: 0.6;
             pointer-events: none;
         }
-
         .input-wrapper input {
             width: 100%;
             padding: 1.1rem 1.1rem 1.1rem 3.2rem;
@@ -314,26 +272,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             color: #191970;
             transition: all 0.2s ease;
         }
-
         .input-wrapper input:focus {
             outline: none;
             border-color: #191970;
             box-shadow: 0 10px 20px -12px #191970;
             background: white;
         }
-
         .input-wrapper input::placeholder {
             color: #191970;
             opacity: 0.4;
             font-weight: 400;
         }
-
         .info-row {
             display: flex;
             justify-content: center;
             margin-top: -0.8rem;
         }
-
         .info-text {
             color: #191970;
             font-size: 0.85rem;
@@ -343,7 +297,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             align-items: center;
             gap: 0.3rem;
         }
-
         .btn {
             padding: 1.1rem 1.8rem;
             border: none;
@@ -357,62 +310,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             justify-content: center;
             gap: 0.8rem;
         }
-
         .btn-primary {
             background: #191970;
             color: #ECEFF1;
             box-shadow: 0 15px 30px -10px #191970;
             border: 2px solid transparent;
         }
-
         .btn-primary:hover {
             background: #24248f;
             transform: translateY(-3px);
             box-shadow: 0 25px 35px -12px #191970;
         }
-
-        .btn-block {
-            width: 100%;
-        }
-
-        .role-selector {
-            display: flex;
-            justify-content: center;
-            gap: 1rem;
-            margin: 1.5rem 0 0.5rem;
-        }
-
-        .role-btn {
-            padding: 0.5rem 1.2rem;
-            border-radius: 30px;
-            border: 2px solid rgba(25, 25, 112, 0.2);
-            background: transparent;
-            color: #191970;
-            font-weight: 600;
-            font-size: 0.9rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .role-btn.active {
-            background: #191970;
-            color: white;
-            border-color: #191970;
-        }
-
-        .role-btn:hover {
-            background: rgba(25, 25, 112, 0.1);
-        }
-
-        .role-btn.active:hover {
-            background: #24248f;
-        }
-
+        .btn-block { width: 100%; }
         .back-link {
             text-align: center;
             margin-top: 2rem;
         }
-
         .back-link a {
             color: #191970;
             font-weight: 600;
@@ -424,54 +337,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             gap: 0.4rem;
             transition: opacity 0.2s;
         }
-
-        .back-link a:hover {
-            opacity: 1;
-        }
-
-        .role-hint {
-            margin-top: 2.5rem;
-            padding-top: 1.5rem;
-            border-top: 2px solid rgba(25, 25, 112, 0.1);
+        .back-link a:hover { opacity: 1; }
+        .otp-note {
+            background: #e3f2fd;
+            border-radius: 12px;
+            padding: 10px;
             text-align: center;
-        }
-
-        .role-hint p {
             font-size: 0.85rem;
-            font-weight: 500;
-            color: #191970;
-            opacity: 0.5;
-            margin-bottom: 0.8rem;
-            letter-spacing: 0.3px;
+            margin-top: 15px;
+            color: #1565c0;
+            border: 1px solid #bbdefb;
         }
-
-        .role-icons {
-            display: flex;
-            justify-content: center;
-            gap: 1.5rem;
-            margin-top: 0.8rem;
-        }
-
-        .role-icon-item {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.3rem;
-            color: #191970;
-            opacity: 0.6;
-            font-size: 0.8rem;
-            font-weight: 500;
-        }
-
-        .role-icon-item i {
-            font-size: 1.2rem;
-        }
-
+        .otp-note i { margin-right: 5px; }
         @media (max-width: 500px) {
             .auth-card { padding: 2rem 1.5rem; }
             .logo-text { font-size: 2rem; }
             .logo-text span { font-size: 1.6rem; }
-            .role-selector { flex-wrap: wrap; }
         }
     </style>
 </head>
@@ -487,11 +368,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             </div>
 
             <div class="auth-header">
-                <div class="role-badge">
-                    <i class="fas fa-users"></i> Unified Portal Access
-                </div>
                 <h2>Welcome Back!</h2>
-                <p>Sign in to continue to ICARE Clinic System</p>
+                <p>Sign in to your account</p>
             </div>
             
             <?php if ($error): ?>
@@ -508,13 +386,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 </div>
             <?php endif; ?>
             
-            <div class="role-selector">
-                <button type="button" class="role-btn active" id="allRoleBtn" onclick="showAllFields()">
-                    <i class="fas fa-users"></i> All Users
-                </button>
-            </div>
-            
-            <form method="POST" action="" class="auth-form">
+            <form method="POST" action="" class="auth-form" id="loginForm">
                 <div class="form-group">
                     <label for="student_id"><i class="far fa-id-card" style="margin-right: 0.3rem;"></i>Username / Student ID / Email</label>
                     <div class="input-wrapper">
@@ -532,27 +404,31 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 </div>
 
                 <div class="info-row">
-                    <span class="info-text"><i class="fas fa-info-circle"></i> Students: Default password is 0000 | Staff: Use your credentials</span>
+                    <span class="info-text"><i class="fas fa-info-circle"></i> Students: Default password is 0000</span>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-block">
+                <button type="submit" class="btn btn-primary btn-block" id="loginBtn">
                     <i class="fas fa-arrow-right-to-bracket"></i> Sign In
                 </button>
             </form>
 
-            <div class="back-link">
-                <a href="index.php"><i class="fas fa-chevron-left"></i> back to home</a>
+            <div class="otp-note">
+                <i class="fas fa-shield-alt"></i> For security, we'll send a verification code to your email after login.
             </div>
 
-          
+            <div class="back-link">
+                <a href="index.php"><i class="fas fa-chevron-left"></i> back to home</a>
             </div>
         </div>
     </div>
 
     <script>
-        function showAllFields() {
-            document.getElementById('allRoleBtn').classList.add('active');
-        }
+        // Add loading state to prevent double submission
+        document.getElementById('loginForm').addEventListener('submit', function() {
+            const btn = document.getElementById('loginBtn');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing in...';
+            btn.disabled = true;
+        });
     </script>
 </body>
 </html>
