@@ -47,6 +47,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['verify'])) {
             $_SESSION['full_name'] = $_SESSION['otp_full_name'];
             $_SESSION['email'] = $_SESSION['otp_email'];
             $_SESSION['role'] = $_SESSION['otp_role'];
+            
+            // Also store student_id if this is a student
+            if (isset($_SESSION['otp_student_id'])) {
+                $_SESSION['student_id'] = $_SESSION['otp_student_id'];
+            }
+            
+            if (isset($_SESSION['otp_student_data'])) {
+                $_SESSION['student_data'] = $_SESSION['otp_student_data'];
+            }
+            
             $_SESSION['login_time'] = time();
             
             // Create session record
@@ -73,14 +83,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['verify'])) {
             unset($_SESSION['otp_full_name']);
             unset($_SESSION['otp_email']);
             unset($_SESSION['otp_role']);
+            unset($_SESSION['otp_student_id']);
+            unset($_SESSION['otp_student_data']);
+            
+            // Debug - log the role before redirect
+            error_log("User role after OTP verification: " . $_SESSION['role']);
             
             // Redirect based on role
             if ($_SESSION['role'] === 'superadmin') {
                 header('Location: superadmin/dashboard.php');
             } elseif ($_SESSION['role'] === 'nurse') {
                 header('Location: nurse/dashboard.php');
-            } else {
+            } elseif ($_SESSION['role'] === 'student') {
+                header('Location: student/dashboard.php');
+            } elseif ($_SESSION['role'] === 'admin') {
                 header('Location: admin/dashboard.php');
+            } elseif ($_SESSION['role'] === 'staff') {
+                header('Location: admin/dashboard.php');
+            } else {
+                // Fallback - if role is not recognized, try to determine from session
+                if (isset($_SESSION['student_id'])) {
+                    header('Location: student/dashboard.php');
+                } else {
+                    header('Location: admin/dashboard.php');
+                }
             }
             exit();
         } else {
@@ -110,6 +136,7 @@ $otpHelper->cleanupExpiredOTPs();
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
+        /* Keep your existing styles */
         * {
             margin: 0;
             padding: 0;

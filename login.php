@@ -49,6 +49,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $_SESSION['otp_email'] = $result['user']['email'];
             $_SESSION['otp_role'] = $result['user']['role'];
             
+            // Store student-specific data
+            if (isset($result['student'])) {
+                $_SESSION['otp_student_id'] = $result['student']['student_id'];
+                $_SESSION['otp_student_data'] = $result['student'];
+            }
+            
+            // Debug log
+            error_log("Student login successful - User ID: " . $result['user']['id'] . ", Role: " . $result['user']['role']);
+            
             // Generate and send OTP
             $otp = $otpHelper->generateOTP($result['user']['id'], $result['user']['email']);
             $otpHelper->sendOTPEmail($result['user']['email'], $result['user']['full_name'], $otp);
@@ -75,6 +84,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         $_SESSION['otp_email'] = $user['email'];
                         $_SESSION['otp_role'] = $user['role'];
                         
+                        // Debug log
+                        error_log("Staff/Admin login successful - User ID: " . $user['id'] . ", Role: " . $user['role']);
+                        
                         // Generate and send OTP
                         $otp = $otpHelper->generateOTP($user['id'], $user['email']);
                         $otpHelper->sendOTPEmail($user['email'], $user['full_name'], $otp);
@@ -88,6 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $error = 'User not found';
                 }
             } catch (PDOException $e) {
+                error_log("Login database error: " . $e->getMessage());
                 $error = 'Database error: ' . $e->getMessage();
             }
         }
@@ -105,7 +118,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* Same styles as before - keeping it compact */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
