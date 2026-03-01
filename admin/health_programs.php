@@ -52,6 +52,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['verify_access'])) {
     }
 }
 
+// Handle appointment approval/rejection
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['appointment_action'])) {
+    $appointment_id = $_POST['appointment_id'];
+    $action = $_POST['appointment_action']; // 'approve' or 'reject'
+    
+    try {
+        // Get appointment details first
+        $query = "SELECT a.*, p.student_id, p.full_name as patient_name 
+                  FROM appointments a 
+                  JOIN patients p ON a.patient_id = p.id 
+                  WHERE a.id = :appointment_id";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':appointment_id', $appointment_id);
+        $stmt->execute();
+        $appointment = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($appointment) {
+            if ($action === 'approve') {
+                // Update appointment status to 'scheduled' (approved)
+                $update_query = "UPDATE appointments SET status = 'scheduled' WHERE id = :appointment_id";
+                $update_stmt = $db->prepare($update_query);
+                $update_stmt->bindParam(':appointment_id', $appointment_id);
+                
+                if ($update_stmt->execute()) {
+                    $success_message = "Appointment #" . $appointment_id . " has been approved successfully!";
+                    
+                    // Log the approval
+                    error_log("Appointment " . $appointment_id . " approved by user " . $current_user_id);
+                } else {
+                    $error_message = "Error approving appointment.";
+                }
+            } elseif ($action === 'reject') {
+                // Update appointment status to 'cancelled' (rejected)
+                $update_query = "UPDATE appointments SET status = 'cancelled' WHERE id = :appointment_id";
+                $update_stmt = $db->prepare($update_query);
+                $update_stmt->bindParam(':appointment_id', $appointment_id);
+                
+                if ($update_stmt->execute()) {
+                    $success_message = "Appointment #" . $appointment_id . " has been rejected.";
+                    
+                    // Log the rejection
+                    error_log("Appointment " . $appointment_id . " rejected by user " . $current_user_id);
+                } else {
+                    $error_message = "Error rejecting appointment.";
+                }
+            }
+        } else {
+            $error_message = "Appointment not found.";
+        }
+    } catch (PDOException $e) {
+        $error_message = "Database error: " . $e->getMessage();
+        error_log("Error processing appointment: " . $e->getMessage());
+    }
+}
+
 // Function to fetch data from school event management API
 function fetchHealthProgramsFromAPI() {
     $api_url = "https://cps.qcprotektado.com/api/health_program.php";
@@ -129,6 +184,52 @@ function fetchClearanceStatus($event_id) {
         return json_decode($response, true);
     }
     return null;
+}
+
+// Function to get pending appointments
+function getPendingAppointments($db) {
+    try {
+        $query = "SELECT a.*, p.student_id, p.full_name as patient_name, p.phone, u.full_name as doctor_name 
+                  FROM appointments a 
+                  JOIN patients p ON a.patient_id = p.id 
+                  LEFT JOIN users u ON a.doctor_id = u.id 
+                  WHERE a.status = 'scheduled' 
+                  ORDER BY a.appointment_date ASC, a.appointment_time ASC 
+                  LIMIT 20";
+        $stmt = $db->prepare($query);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Error fetching appointments: " . $e->getMessage());
+        return [];
+    }
+}
+
+// Function to get appointment statistics
+function getAppointmentStats($db) {
+    try {
+        $stats = [];
+        
+        // Total pending
+        $query = "SELECT COUNT(*) as total FROM appointments WHERE status = 'scheduled'";
+        $stmt = $db->query($query);
+        $stats['pending'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+        
+        // Today's appointments
+        $query = "SELECT COUNT(*) as total FROM appointments WHERE appointment_date = CURDATE()";
+        $stmt = $db->query($query);
+        $stats['today'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+        
+        // This week's appointments
+        $query = "SELECT COUNT(*) as total FROM appointments WHERE appointment_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)";
+        $stmt = $db->query($query);
+        $stats['week'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+        
+        return $stats;
+    } catch (PDOException $e) {
+        error_log("Error fetching appointment stats: " . $e->getMessage());
+        return ['pending' => 0, 'today' => 0, 'week' => 0];
+    }
 }
 
 // Create local tables for health monitoring if not exists
@@ -378,6 +479,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
 $upcoming_events = fetchHealthProgramsFromAPI();
 $events_needing_clearance = fetchEventsNeedingClearance();
 $health_metrics = fetchHealthMetrics();
+
+// Get appointment data
+$pending_appointments = getPendingAppointments($db);
+$appointment_stats = getAppointmentStats($db);
 
 // Get local records
 function getVaccinationRecords($db, $student_id = null) {
@@ -982,6 +1087,24 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             font-size: 0.85rem;
         }
 
+        .btn-success {
+            background: #2e7d32;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #1b5e20;
+        }
+
+        .btn-danger {
+            background: #c62828;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #b71c1c;
+        }
+
         /* Quick Stats Card */
         .quick-stats-card {
             background: white;
@@ -1193,6 +1316,119 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             color: #1565c0;
         }
 
+        /* Appointment Card */
+        .appointment-card {
+            background: #f8fafc;
+            border: 1px solid #cfd8dc;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s ease;
+        }
+
+        .appointment-card:hover {
+            box-shadow: 0 4px 12px rgba(25, 25, 112, 0.1);
+            border-color: #191970;
+        }
+
+        .appointment-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #cfd8dc;
+        }
+
+        .appointment-id {
+            font-weight: 700;
+            color: #191970;
+            background: #e3f2fd;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+        }
+
+        .appointment-status {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .appointment-body {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .appointment-info {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .info-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #78909c;
+            text-transform: uppercase;
+        }
+
+        .info-value {
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: #37474f;
+        }
+
+        .info-value strong {
+            color: #191970;
+        }
+
+        .appointment-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .action-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .action-btn.approve {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #a5d6a7;
+        }
+
+        .action-btn.approve:hover {
+            background: #2e7d32;
+            color: white;
+        }
+
+        .action-btn.reject {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
+        .action-btn.reject:hover {
+            background: #c62828;
+            color: white;
+        }
+
         /* Tables */
         .table-wrapper {
             overflow-x: auto;
@@ -1325,6 +1561,10 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             .metrics-grid {
                 grid-template-columns: 1fr;
             }
+            
+            .appointment-body {
+                grid-template-columns: 1fr;
+            }
         }
 
         @media (max-width: 768px) {
@@ -1346,6 +1586,10 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                 flex-direction: column;
                 text-align: center;
             }
+            
+            .appointment-actions {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -1359,7 +1603,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             <div class="dashboard-container">
                 <div class="welcome-section">
                     <h1>🏥 School Health Programs Monitoring</h1>
-                    <p>Track vaccination records, physical exams, deworming, and health screenings.</p>
+                    <p>Track vaccination records, physical exams, deworming, and health screenings. Approve or reject student appointment requests.</p>
                 </div>
 
                 <!-- Alert Messages -->
@@ -1418,6 +1662,107 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                         </div>
                     </div>
                 </div>
+
+                <!-- Appointment Stats Cards -->
+                <div class="stats-grid" style="margin-top: 20px;">
+                    <div class="stat-card">
+                        <div class="stat-icon">📅</div>
+                        <div class="stat-info">
+                            <h3><?php echo $appointment_stats['pending']; ?></h3>
+                            <p>Pending Appointments</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">📆</div>
+                        <div class="stat-info">
+                            <h3><?php echo $appointment_stats['today']; ?></h3>
+                            <p>Today's Appointments</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">🗓️</div>
+                        <div class="stat-info">
+                            <h3><?php echo $appointment_stats['week']; ?></h3>
+                            <p>This Week</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-info">
+                            <h3><?php echo $appointment_stats['pending'] > 0 ? 'Action Needed' : 'All Good'; ?></h3>
+                            <p>Approval Status</p>
+                            <?php if ($appointment_stats['pending'] > 0): ?>
+                                <span class="warning-badge"><?php echo $appointment_stats['pending']; ?> pending</span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pending Appointments Section -->
+                <?php if (!empty($pending_appointments)): ?>
+                <div class="tabs-section" style="margin-bottom: 30px;">
+                    <div class="tabs-header">
+                        <button class="tab-btn active">📋 Pending Appointments for Approval</button>
+                    </div>
+                    <div class="tab-content">
+                        <div class="tab-pane active">
+                            <?php foreach ($pending_appointments as $appointment): ?>
+                                <div class="appointment-card">
+                                    <div class="appointment-header">
+                                        <span class="appointment-id">Appointment #<?php echo $appointment['id']; ?></span>
+                                        <span class="appointment-status">Pending Approval</span>
+                                    </div>
+                                    <div class="appointment-body">
+                                        <div class="appointment-info">
+                                            <span class="info-label">Student</span>
+                                            <span class="info-value"><strong><?php echo htmlspecialchars($appointment['patient_name']); ?></strong> (<?php echo htmlspecialchars($appointment['student_id']); ?>)</span>
+                                            <span class="info-label" style="margin-top: 5px;">Contact</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($appointment['phone'] ?: 'N/A'); ?></span>
+                                        </div>
+                                        <div class="appointment-info">
+                                            <span class="info-label">Date & Time</span>
+                                            <span class="info-value"><strong><?php echo date('M d, Y', strtotime($appointment['appointment_date'])); ?></strong> at <?php echo date('h:i A', strtotime($appointment['appointment_time'])); ?></span>
+                                            <span class="info-label" style="margin-top: 5px;">Preferred Staff</span>
+                                            <span class="info-value"><?php echo $appointment['doctor_name'] ? 'Dr. ' . htmlspecialchars($appointment['doctor_name']) : 'Any available'; ?></span>
+                                        </div>
+                                        <div class="appointment-info">
+                                            <span class="info-label">Reason</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($appointment['reason']); ?></span>
+                                            <span class="info-label" style="margin-top: 5px;">Requested On</span>
+                                            <span class="info-value"><?php echo date('M d, Y', strtotime($appointment['created_at'])); ?></span>
+                                        </div>
+                                    </div>
+                                    <div class="appointment-actions">
+                                        <form method="POST" action="" style="display: inline;" onsubmit="return confirm('Approve this appointment?');">
+                                            <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
+                                            <input type="hidden" name="appointment_action" value="approve">
+                                            <button type="submit" class="action-btn approve">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                                    <path d="M20 6L9 17L4 12"/>
+                                                </svg>
+                                                Approve
+                                            </button>
+                                        </form>
+                                        <form method="POST" action="" style="display: inline;" onsubmit="return confirm('Reject this appointment?');">
+                                            <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
+                                            <input type="hidden" name="appointment_action" value="reject">
+                                            <button type="submit" class="action-btn reject">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                                    <path d="M18 6L6 18M6 6L18 18"/>
+                                                </svg>
+                                                Reject
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
 
                 <!-- Main Grid -->
                 <div class="main-grid">
