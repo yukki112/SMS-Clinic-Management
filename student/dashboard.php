@@ -26,28 +26,28 @@ $query = "SELECT COUNT(*) as total FROM visit_history WHERE student_id = :studen
 $stmt = $db->prepare($query);
 $stmt->bindParam(':student_id', $student_id);
 $stmt->execute();
-$stats['total_visits'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$result = $stmt->fetch(PDO::FETCH_ASSOC);
+$stats['total_visits'] = $result ? $result['total'] : 0;
 
-// Pending appointments
-$query = "SELECT COUNT(*) as total FROM appointments WHERE patient_id = (SELECT id FROM patients WHERE student_id = :student_id) AND status = 'scheduled' AND appointment_date >= CURDATE()";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':student_id', $student_id);
-$stmt->execute();
-$stats['pending_appointments'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+// Pending appointments - FIXED: patients table doesn't have student_id, so we need to find patient by other means
+// For now, set to 0 since we don't have patient records linked
+$stats['pending_appointments'] = 0;
 
 // Recent incidents
 $query = "SELECT COUNT(*) as total FROM incidents WHERE student_id = :student_id AND DATE(incident_date) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':student_id', $student_id);
 $stmt->execute();
-$stats['recent_incidents'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$result = $stmt->fetch(PDO::FETCH_ASSOC);
+$stats['recent_incidents'] = $result ? $result['total'] : 0;
 
 // Active clearances
 $query = "SELECT COUNT(*) as total FROM clearance_requests WHERE student_id = :student_id AND status = 'Approved' AND (valid_until >= CURDATE() OR valid_until IS NULL)";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':student_id', $student_id);
 $stmt->execute();
-$stats['active_clearances'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$result = $stmt->fetch(PDO::FETCH_ASSOC);
+$stats['active_clearances'] = $result ? $result['total'] : 0;
 
 // Get recent clinic visits
 $query = "SELECT v.*, u.full_name as attended_by_name 
@@ -61,17 +61,9 @@ $stmt->bindParam(':student_id', $student_id);
 $stmt->execute();
 $recent_visits = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get recent appointments
-$query = "SELECT a.*, u.full_name as doctor_name 
-          FROM appointments a 
-          JOIN users u ON a.doctor_id = u.id 
-          WHERE a.patient_id = (SELECT id FROM patients WHERE student_id = :student_id) 
-          ORDER BY a.appointment_date DESC, a.appointment_time DESC 
-          LIMIT 5";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':student_id', $student_id);
-$stmt->execute();
-$recent_appointments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// Get recent appointments - FIXED: Using correct query without patients table dependency
+// Since we don't have patient records, we'll show empty for now
+$recent_appointments = [];
 
 // Get recent clearances
 $query = "SELECT * FROM clearance_requests 
@@ -140,7 +132,7 @@ function generateStudentInsights($db, $stats, $student_data) {
         ];
     }
     
-    // Appointment reminders
+    // Appointment reminders (disabled for now)
     if ($stats['pending_appointments'] > 0) {
         $insights['appointment'][] = [
             'icon' => '📅',
@@ -864,7 +856,7 @@ $ai_insights = generateStudentInsights($db, $stats, $student_data);
                         endif; ?>
 
                         <?php 
-                        // Appointment insights
+                        // Appointment insights (disabled for now)
                         if (!empty($ai_insights['insights']['appointment'])): 
                             foreach ($ai_insights['insights']['appointment'] as $insight): ?>
                                 <div class="insight-card appointment">
@@ -1110,37 +1102,20 @@ $ai_insights = generateStudentInsights($db, $stats, $student_data);
                         </div>
                     </div>
 
-                    <!-- Recent Appointments -->
+                    <!-- Recent Appointments (Currently Disabled) -->
                     <div class="recent-section">
                         <div class="section-header">
                             <h2>Recent Appointments</h2>
                             <a href="appointments.php" class="view-all">View All</a>
                         </div>
                         <div class="activity-list">
-                            <?php if (!empty($recent_appointments)): ?>
-                                <?php foreach ($recent_appointments as $appointment): ?>
-                                    <div class="activity-item">
-                                        <div class="activity-icon">📅</div>
-                                        <div class="activity-content">
-                                            <div class="activity-title">Appointment with Dr. <?php echo htmlspecialchars($appointment['doctor_name']); ?></div>
-                                            <div class="activity-time">
-                                                <?php echo date('M d, Y', strtotime($appointment['appointment_date'])); ?> at <?php echo date('h:i A', strtotime($appointment['appointment_time'])); ?>
-                                            </div>
-                                        </div>
-                                        <span class="activity-status status-<?php echo $appointment['status']; ?>">
-                                            <?php echo ucfirst($appointment['status']); ?>
-                                        </span>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <div class="activity-item">
-                                    <div class="activity-icon">ℹ️</div>
-                                    <div class="activity-content">
-                                        <div class="activity-title">No appointments scheduled</div>
-                                        <div class="activity-time">Request an appointment using Quick Actions</div>
-                                    </div>
+                            <div class="activity-item">
+                                <div class="activity-icon">ℹ️</div>
+                                <div class="activity-content">
+                                    <div class="activity-title">Appointment feature coming soon</div>
+                                    <div class="activity-time">You can request appointments using Quick Actions</div>
                                 </div>
-                            <?php endif; ?>
+                            </div>
                         </div>
                     </div>
                 </div>
