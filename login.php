@@ -1,66 +1,93 @@
 <?php
 session_start();
 require_once 'config/database.php';
-require_once 'config/otp_helper.php';
+require_once 'config/student_auth.php';
 
 // Redirect if already logged in
 if (isset($_SESSION['user_id'])) {
-    if ($_SESSION['role'] === 'superadmin') {
+    if ($_SESSION['role'] === 'student') {
+        header('Location: student/dashboard.php');
+        exit();
+    } elseif ($_SESSION['role'] === 'superadmin') {
         header('Location: superadmin/dashboard.php');
+        exit();
+    } elseif ($_SESSION['role'] === 'admin') {
+        header('Location: admin/dashboard.php');
+        exit();
     } elseif ($_SESSION['role'] === 'nurse') {
         header('Location: nurse/dashboard.php');
-    } elseif (in_array($_SESSION['role'], ['admin', 'staff'])) {
+        exit();
+    } elseif ($_SESSION['role'] === 'staff') {
         header('Location: admin/dashboard.php');
+        exit();
     }
     exit();
 }
 
 $error = '';
+$studentAuth = new StudentAuth();
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $database = new Database();
-    $db = $database->getConnection();
-    $otpHelper = new OTPHelper($db);
-    
-    $username = trim($_POST['username']);
+    $student_id = trim($_POST['student_id']);
     $password = $_POST['password'];
     
-    if (empty($username) || empty($password)) {
-        $error = 'Please enter username/email and password';
+    if (empty($student_id) || empty($password)) {
+        $error = 'Please enter student ID and password';
     } else {
-        $query = "SELECT * FROM users WHERE (username = :username OR email = :username) AND role IN ('admin', 'superadmin', 'staff', 'nurse')";
-        $stmt = $db->prepare($query);
-        $stmt->bindParam(':username', $username);
-        $stmt->execute();
+        // First try student login
+        $result = $studentAuth->login($student_id, $password);
         
-        if ($user = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            if (password_verify($password, $user['password'])) {
-                
-                // --- START OTP IMPLEMENTATION ---
-                // Generate and send OTP
-                $otp = $otpHelper->generateOTP($user['id'], $user['email']);
-                
-                if ($otpHelper->sendOTPEmail($user['email'], $user['full_name'], $otp)) {
-                    // Store user data in session for OTP verification
-                    $_SESSION['otp_user_id'] = $user['id'];
-                    $_SESSION['otp_username'] = $user['username'];
-                    $_SESSION['otp_full_name'] = $user['full_name'];
-                    $_SESSION['otp_email'] = $user['email'];
-                    $_SESSION['otp_role'] = $user['role'];
-                    
-                    // Redirect to OTP verification page
-                    header('Location: verify-otp.php');
-                    exit();
-                } else {
-                    $error = 'Failed to send verification code. Please try again.';
-                }
-                // --- END OTP IMPLEMENTATION ---
-                
-            } else {
-                $error = 'Invalid password!';
-            }
+        if ($result['success']) {
+            $_SESSION['user_id'] = $result['user']['id'];
+            $_SESSION['username'] = $result['user']['username'];
+            $_SESSION['full_name'] = $result['user']['full_name'];
+            $_SESSION['role'] = $result['user']['role'];
+            $_SESSION['student_id'] = $result['student']['student_id'];
+            $_SESSION['student_data'] = $result['student'];
+            
+            header('Location: student/dashboard.php');
+            exit();
         } else {
-            $error = 'User not found!';
+            // If not student, try staff/admin login
+            try {
+                $database = new Database();
+                $db = $database->getConnection();
+                
+                $query = "SELECT * FROM users WHERE username = :username OR email = :email";
+                $stmt = $db->prepare($query);
+                $stmt->bindParam(':username', $student_id);
+                $stmt->bindParam(':email', $student_id);
+                $stmt->execute();
+                
+                if ($stmt->rowCount() > 0) {
+                    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+                    
+                    if (password_verify($password, $user['password'])) {
+                        $_SESSION['user_id'] = $user['id'];
+                        $_SESSION['username'] = $user['username'];
+                        $_SESSION['full_name'] = $user['full_name'];
+                        $_SESSION['role'] = $user['role'];
+                        
+                        // Redirect based on role
+                        if ($user['role'] === 'superadmin') {
+                            header('Location: superadmin/dashboard.php');
+                        } elseif ($user['role'] === 'admin' || $user['role'] === 'staff') {
+                            header('Location: admin/dashboard.php');
+                        } elseif ($user['role'] === 'nurse') {
+                            header('Location: nurse/dashboard.php');
+                        } else {
+                            header('Location: admin/dashboard.php');
+                        }
+                        exit();
+                    } else {
+                        $error = 'Invalid password';
+                    }
+                } else {
+                    $error = 'User not found';
+                }
+            } catch (PDOException $e) {
+                $error = 'Database error: ' . $e->getMessage();
+            }
         }
     }
 }
@@ -70,8 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ICARE · staff login</title>
-    <!-- same fonts & icons as landing page -->
+    <title>Login · ICARE Clinic Management System</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
@@ -95,7 +121,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             overflow-x: hidden;
         }
 
-        /* subtle floating shapes (same as landing page) */
         .bg-shape {
             position: absolute;
             width: 500px;
@@ -132,7 +157,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             100% { transform: translate(50px, 30px) rotate(-18deg); }
         }
 
-        /* main login card — matches landing card aesthetic */
         .auth-container {
             width: 100%;
             max-width: 480px;
@@ -156,7 +180,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             transform: scale(1.01);
         }
 
-        /* logo + wordmark exactly as landing */
         .logo-wrapper {
             display: flex;
             align-items: center;
@@ -205,7 +228,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             font-weight: 500;
         }
 
-        /* alert styling */
+        .role-badge {
+            background: rgba(25, 25, 112, 0.1);
+            padding: 0.5rem 1.5rem;
+            border-radius: 60px;
+            display: inline-block;
+            margin-bottom: 1rem;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #191970;
+            border: 1px solid rgba(25, 25, 112, 0.2);
+        }
+
         .alert {
             padding: 1.1rem 1.5rem;
             border-radius: 100px;
@@ -235,7 +269,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             font-size: 1.3rem;
         }
 
-        /* form */
         .auth-form {
             display: flex;
             flex-direction: column;
@@ -295,27 +328,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             font-weight: 400;
         }
 
-        .forgot-row {
+        .info-row {
             display: flex;
-            justify-content: flex-end;
+            justify-content: center;
             margin-top: -0.8rem;
         }
 
-        .forgot-link {
+        .info-text {
             color: #191970;
-            font-size: 0.9rem;
-            font-weight: 600;
-            text-decoration: none;
-            opacity: 0.7;
-            transition: opacity 0.2s;
+            font-size: 0.85rem;
+            font-weight: 500;
+            opacity: 0.6;
             display: inline-flex;
             align-items: center;
             gap: 0.3rem;
-        }
-
-        .forgot-link:hover {
-            opacity: 1;
-            text-decoration: underline;
         }
 
         .btn {
@@ -349,7 +375,39 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             width: 100%;
         }
 
-        /* back link */
+        .role-selector {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin: 1.5rem 0 0.5rem;
+        }
+
+        .role-btn {
+            padding: 0.5rem 1.2rem;
+            border-radius: 30px;
+            border: 2px solid rgba(25, 25, 112, 0.2);
+            background: transparent;
+            color: #191970;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .role-btn.active {
+            background: #191970;
+            color: white;
+            border-color: #191970;
+        }
+
+        .role-btn:hover {
+            background: rgba(25, 25, 112, 0.1);
+        }
+
+        .role-btn.active:hover {
+            background: #24248f;
+        }
+
         .back-link {
             text-align: center;
             margin-top: 2rem;
@@ -371,7 +429,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             opacity: 1;
         }
 
-        /* role badges (discreet, matches design) */
         .role-hint {
             margin-top: 2.5rem;
             padding-top: 1.5rem;
@@ -388,48 +445,53 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             letter-spacing: 0.3px;
         }
 
-        .role-badges {
+        .role-icons {
             display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
             justify-content: center;
+            gap: 1.5rem;
+            margin-top: 0.8rem;
         }
 
-        .role-badge {
-            background: rgba(25, 25, 112, 0.05);
-            border: 1px solid rgba(25, 25, 112, 0.2);
-            padding: 0.3rem 1rem;
-            border-radius: 60px;
-            font-size: 0.8rem;
-            font-weight: 600;
+        .role-icon-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.3rem;
             color: #191970;
-            backdrop-filter: blur(2px);
+            opacity: 0.6;
+            font-size: 0.8rem;
+            font-weight: 500;
         }
 
-        /* responsive */
+        .role-icon-item i {
+            font-size: 1.2rem;
+        }
+
         @media (max-width: 500px) {
             .auth-card { padding: 2rem 1.5rem; }
             .logo-text { font-size: 2rem; }
             .logo-text span { font-size: 1.6rem; }
+            .role-selector { flex-wrap: wrap; }
         }
     </style>
 </head>
 <body>
-    <!-- floating background shapes (same as landing) -->
     <div class="bg-shape"></div>
     <div class="bg-shape-two"></div>
 
     <div class="auth-container">
         <div class="auth-card">
-            <!-- logo identical to landing page -->
             <div class="logo-wrapper">
                 <img src="assets/images/clinic.png" alt="ICARE" class="logo-img" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'56\' height=\'56\' viewBox=\'0 0 24 24\' fill=\'%23191970\'%3E%3Cpath d=\'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z\'/%3E%3C/svg%3E';">
                 <span class="logo-text">ICARE<span>clinic</span></span>
             </div>
 
             <div class="auth-header">
-                <h2>Sign In</h2>
-              
+                <div class="role-badge">
+                    <i class="fas fa-users"></i> Unified Portal Access
+                </div>
+                <h2>Welcome Back!</h2>
+                <p>Sign in to continue to ICARE Clinic System</p>
             </div>
             
             <?php if ($error): ?>
@@ -442,23 +504,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             <?php if (isset($_GET['registered'])): ?>
                 <div class="alert alert-success">
                     <i class="fas fa-check-circle"></i>
-                    Registration successful! Please login.
+                    Account created! Default password is <strong>0000</strong>. Please change your password.
                 </div>
             <?php endif; ?>
             
-            <?php if (isset($_GET['session_expired'])): ?>
-                <div class="alert alert-error">
-                    <i class="fas fa-clock"></i>
-                    Your session has expired. Please login again.
-                </div>
-            <?php endif; ?>
+            <div class="role-selector">
+                <button type="button" class="role-btn active" id="allRoleBtn" onclick="showAllFields()">
+                    <i class="fas fa-users"></i> All Users
+                </button>
+            </div>
             
             <form method="POST" action="" class="auth-form">
                 <div class="form-group">
-                    <label for="username"><i class="far fa-user" style="margin-right: 0.3rem;"></i>Username or email</label>
+                    <label for="student_id"><i class="far fa-id-card" style="margin-right: 0.3rem;"></i>Username / Student ID / Email</label>
                     <div class="input-wrapper">
-                        <i class="fas fa-id-card"></i>
-                        <input type="text" id="username" name="username" placeholder="e.g., nurse_maria" value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>" required>
+                        <i class="fas fa-user"></i>
+                        <input type="text" id="student_id" name="student_id" placeholder="Enter your username, student ID, or email" value="<?php echo isset($_POST['student_id']) ? htmlspecialchars($_POST['student_id']) : ''; ?>" required>
                     </div>
                 </div>
 
@@ -466,16 +527,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     <label for="password"><i class="fas fa-lock" style="margin-right: 0.3rem;"></i>Password</label>
                     <div class="input-wrapper">
                         <i class="fas fa-key"></i>
-                        <input type="password" id="password" name="password" placeholder="··········" required>
+                        <input type="password" id="password" name="password" placeholder="Enter your password" required>
                     </div>
                 </div>
 
-                <div class="forgot-row">
-                    <a href="forgot-password.php" class="forgot-link"><i class="fas fa-chevron-right"></i> forgot password?</a>
+                <div class="info-row">
+                    <span class="info-text"><i class="fas fa-info-circle"></i> Students: Default password is 0000 | Staff: Use your credentials</span>
                 </div>
 
                 <button type="submit" class="btn btn-primary btn-block">
-                    <i class="fas fa-arrow-right-to-bracket"></i> sign in
+                    <i class="fas fa-arrow-right-to-bracket"></i> Sign In
                 </button>
             </form>
 
@@ -483,8 +544,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 <a href="index.php"><i class="fas fa-chevron-left"></i> back to home</a>
             </div>
 
-           
+          
+            </div>
         </div>
     </div>
+
+    <script>
+        function showAllFields() {
+            document.getElementById('allRoleBtn').classList.add('active');
+        }
+    </script>
 </body>
 </html>
