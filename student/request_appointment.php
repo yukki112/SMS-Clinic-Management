@@ -14,9 +14,8 @@ $db = $database->getConnection();
 $student_id = $_SESSION['student_id'];
 $student_data = $_SESSION['student_data'];
 
-// Get appointment types/categories
+// Get appointment types/categories - REMOVED Consultation
 $appointment_types = [
-    'Consultation' => 'General Consultation',
     'Vaccination' => 'Vaccination',
     'Physical Exam' => 'Physical Examination',
     'Deworming' => 'Deworming',
@@ -572,10 +571,6 @@ $doctors = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         Available Appointment Types
                     </div>
                     <div class="appointment-types">
-                        <div class="type-item">
-                            <i>🩺</i>
-                            Consultation
-                        </div>
                         <div class="type-item">
                             <i>💉</i>
                             Vaccination
