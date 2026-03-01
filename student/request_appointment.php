@@ -30,14 +30,14 @@ $query = "SELECT a.*,
           DATE_FORMAT(a.appointment_date, '%Y-%m-%d') as formatted_date,
           DATE_FORMAT(a.appointment_time, '%h:%i %p') as formatted_time,
           CASE 
-              WHEN a.status = 'scheduled' THEN 'pending'
-              WHEN a.status = 'approved' THEN 'approved'
+              WHEN a.status = 'pending' THEN 'pending'
+              WHEN a.status = 'scheduled' THEN 'approved'
               WHEN a.status = 'completed' THEN 'completed'
               WHEN a.status = 'cancelled' THEN 'cancelled'
           END as calendar_status,
           CASE 
-              WHEN a.status = 'scheduled' THEN 'bg-yellow-500'
-              WHEN a.status = 'approved' THEN 'bg-green-500'
+              WHEN a.status = 'pending' THEN 'bg-yellow-500'
+              WHEN a.status = 'scheduled' THEN 'bg-green-500'
               WHEN a.status = 'completed' THEN 'bg-blue-500'
               WHEN a.status = 'cancelled' THEN 'bg-red-500'
           END as status_color
@@ -92,14 +92,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $patient_id = $db->lastInsertId();
     }
     
-    // Create appointment with type
+    // Create appointment with type - FIXED: Changed status from 'scheduled' to 'pending'
     $full_reason = $appointment_type . ': ' . $reason;
     if (!empty($notes)) {
         $full_reason .= ' (Notes: ' . $notes . ')';
     }
     
     $query = "INSERT INTO appointments (patient_id, doctor_id, appointment_date, appointment_time, reason, status) 
-              VALUES (:patient_id, :doctor_id, :appointment_date, :appointment_time, :reason, 'scheduled')";
+              VALUES (:patient_id, :doctor_id, :appointment_date, :appointment_time, :reason, 'pending')";
     $stmt = $db->prepare($query);
     $stmt->bindParam(':patient_id', $patient_id);
     $stmt->bindParam(':doctor_id', $doctor_id);
@@ -108,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $stmt->bindParam(':reason', $full_reason);
     
     if ($stmt->execute()) {
-        $success_message = "Appointment requested successfully! The clinic staff will review your request.";
+        $success_message = "Appointment requested successfully! The clinic staff will review your request. You will receive an email notification once your appointment is approved.";
         // Refresh the page to show new appointment
         header('Location: request_appointment.php?success=1');
         exit();
@@ -118,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Get available doctors
-$query = "SELECT id, full_name FROM users WHERE role IN ('doctor', 'nurse') AND status = 'active' ORDER BY full_name";
+$query = "SELECT id, full_name FROM users WHERE role IN ('doctor', 'nurse', 'admin') AND status = 'active' ORDER BY full_name";
 $stmt = $db->query($query);
 $doctors = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -151,7 +151,6 @@ if (isset($_GET['view'])) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/3.10.2/fullcalendar.min.css" />
     <style>
         * {
             margin: 0;
@@ -500,6 +499,7 @@ if (isset($_GET['view'])) {
         }
 
         .status-pending { background: #f59e0b; }
+        .status-scheduled { background: #10b981; }
         .status-approved { background: #10b981; }
         .status-completed { background: #3b82f6; }
         .status-cancelled { background: #ef4444; }
@@ -538,6 +538,11 @@ if (isset($_GET['view'])) {
         .badge-pending {
             background: #fff3cd;
             color: #856404;
+        }
+
+        .badge-scheduled {
+            background: #d4edda;
+            color: #155724;
         }
 
         .badge-approved {
@@ -1058,17 +1063,22 @@ if (isset($_GET['view'])) {
                 <div class="status-summary">
                     <?php
                     $status_counts = [
+                        'pending' => 0,
                         'scheduled' => 0,
                         'approved' => 0,
                         'completed' => 0,
                         'cancelled' => 0
                     ];
                     foreach ($appointments as $appt) {
-                        $status_counts[$appt['status']] = ($status_counts[$appt['status']] ?? 0) + 1;
+                        if ($appt['status'] == 'scheduled') {
+                            $status_counts['approved'] = ($status_counts['approved'] ?? 0) + 1;
+                        } else {
+                            $status_counts[$appt['status']] = ($status_counts[$appt['status']] ?? 0) + 1;
+                        }
                     }
                     ?>
                     <div class="status-badge">
-                        <div class="count"><?php echo $status_counts['scheduled']; ?></div>
+                        <div class="count"><?php echo $status_counts['pending']; ?></div>
                         <div class="label">Pending</div>
                     </div>
                     <div class="status-badge">
@@ -1088,7 +1098,7 @@ if (isset($_GET['view'])) {
                 <!-- Tabs -->
                 <div class="tabs-container">
                     <div class="tabs">
-                        <button class="tab-btn active" onclick="switchTab('calendar')">
+                        <button class="tab-btn active" onclick="switchTab('calendar', event)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
                                 <line x1="16" y1="2" x2="16" y2="6"/>
@@ -1097,7 +1107,7 @@ if (isset($_GET['view'])) {
                             </svg>
                             Calendar View
                         </button>
-                        <button class="tab-btn" onclick="switchTab('list')">
+                        <button class="tab-btn" onclick="switchTab('list', event)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="8" y1="6" x2="21" y2="6"/>
                                 <line x1="8" y1="12" x2="21" y2="12"/>
@@ -1108,7 +1118,7 @@ if (isset($_GET['view'])) {
                             </svg>
                             List View
                         </button>
-                        <button class="tab-btn" onclick="switchTab('new')">
+                        <button class="tab-btn" onclick="switchTab('new', event)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"/>
                                 <line x1="12" y1="8" x2="12" y2="16"/>
@@ -1170,8 +1180,14 @@ if (isset($_GET['view'])) {
                                             <span>Requested: <?php echo date('M j, Y', strtotime($appt['created_at'])); ?></span>
                                         </div>
                                     </div>
-                                    <div class="appointment-status-badge badge-<?php echo $appt['status']; ?>">
-                                        <?php echo ucfirst($appt['status']); ?>
+                                    <div class="appointment-status-badge badge-<?php echo $appt['status'] == 'scheduled' ? 'approved' : $appt['status']; ?>">
+                                        <?php 
+                                        if ($appt['status'] == 'scheduled') {
+                                            echo 'Approved';
+                                        } else {
+                                            echo ucfirst($appt['status']); 
+                                        }
+                                        ?>
                                     </div>
                                 </div>
                             <?php endforeach; ?>
@@ -1243,7 +1259,7 @@ if (isset($_GET['view'])) {
                                     <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999"/>
                                     <path d="M22 4L12 14.01L9 11.01"/>
                                 </svg>
-                                Appointment requested successfully! The clinic staff will review your request.
+                                Appointment requested successfully! The clinic staff will review your request. You will receive an email notification once your appointment is approved.
                             </div>
                         <?php endif; ?>
 
@@ -1399,8 +1415,14 @@ if (isset($_GET['view'])) {
                 <div class="modal-body">
                     <div class="detail-group">
                         <div class="detail-label">Status</div>
-                        <div class="status-display badge-<?php echo $selected_appointment['status']; ?>">
-                            <?php echo ucfirst($selected_appointment['status']); ?>
+                        <div class="status-display badge-<?php echo $selected_appointment['status'] == 'scheduled' ? 'approved' : $selected_appointment['status']; ?>">
+                            <?php 
+                            if ($selected_appointment['status'] == 'scheduled') {
+                                echo 'Approved';
+                            } else {
+                                echo ucfirst($selected_appointment['status']); 
+                            }
+                            ?>
                         </div>
                     </div>
 
@@ -1427,16 +1449,16 @@ if (isset($_GET['view'])) {
                         <div class="detail-value"><?php echo date('F j, Y g:i A', strtotime($selected_appointment['created_at'])); ?></div>
                     </div>
 
-                    <?php if ($selected_appointment['status'] === 'approved'): ?>
+                    <?php if ($selected_appointment['status'] === 'scheduled'): ?>
                         <div class="detail-group">
                             <div class="detail-label">Approval Note</div>
-                            <div class="detail-value">Your appointment has been approved. Please arrive on time.</div>
+                            <div class="detail-value">Your appointment has been approved. Please arrive on time. A confirmation email has been sent to your email address.</div>
                         </div>
                     <?php endif; ?>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" onclick="closeModal()">Close</button>
-                    <?php if ($selected_appointment['status'] === 'scheduled'): ?>
+                    <?php if ($selected_appointment['status'] === 'pending'): ?>
                         <button class="btn btn-primary" onclick="cancelAppointment(<?php echo $selected_appointment['id']; ?>)">Cancel Appointment</button>
                     <?php endif; ?>
                 </div>
@@ -1471,7 +1493,7 @@ if (isset($_GET['view'])) {
         });
 
         // Tab switching function
-        function switchTab(tab) {
+        function switchTab(tab, event) {
             // Update tab buttons
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             event.target.classList.add('active');
@@ -1520,7 +1542,8 @@ if (isset($_GET['view'])) {
                     calendarHtml += '<div class="calendar-events">';
                     dayAppointments.forEach(appt => {
                         const time = appt.appointment_time.substring(0, 5);
-                        calendarHtml += `<div class="calendar-event event-${appt.calendar_status}" onclick="viewAppointment(${appt.id})">`;
+                        const displayStatus = appt.status == 'scheduled' ? 'approved' : appt.status;
+                        calendarHtml += `<div class="calendar-event event-${displayStatus}" onclick="viewAppointment(${appt.id})">`;
                         calendarHtml += `${time} - ${appt.reason.substring(0, 30)}${appt.reason.length > 30 ? '...' : ''}`;
                         calendarHtml += '</div>';
                     });
