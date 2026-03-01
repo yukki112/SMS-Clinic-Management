@@ -2,6 +2,15 @@
 session_start();
 require_once '../config/database.php';
 
+// Load PHPMailer
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\SMTP;
+use PHPMailer\PHPMailer\Exception;
+
+require '../vendor/phpmailer/phpmailer/src/Exception.php';
+require '../vendor/phpmailer/phpmailer/src/PHPMailer.php';
+require '../vendor/phpmailer/phpmailer/src/SMTP.php';
+
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
     header('Location: ../login.php');
@@ -14,6 +23,99 @@ $db = $database->getConnection();
 // Get current user info
 $current_user_id = $_SESSION['user_id'];
 $current_user_name = $_SESSION['username'] ?? 'Clinic Staff';
+
+// Email configuration
+function sendAppointmentEmail($student_email, $student_name, $appointment_date, $appointment_time, $reason, $status = 'approved') {
+    $mail = new PHPMailer(true);
+    
+    try {
+        // Server settings
+        $mail->isSMTP();
+        $mail->Host       = 'smtp.gmail.com'; // or your SMTP server
+        $mail->SMTPAuth   = true;
+        $mail->Username = 'Stephenviray12@gmail.com';
+        $mail->Password = 'bubr nckn tgqf lvus';
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port       = 587;
+
+        // Recipients
+        $mail->setFrom('your-email@gmail.com', 'School Clinic');
+        $mail->addAddress($student_email, $student_name);
+
+        // Content
+        $mail->isHTML(true);
+        
+        if ($status == 'approved') {
+            $mail->Subject = 'Appointment Approved - School Clinic';
+            $mail->Body = "
+                <div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;'>
+                    <div style='background: #191970; color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;'>
+                        <h2 style='margin: 0;'>✅ Appointment Approved</h2>
+                    </div>
+                    <div style='padding: 20px; background: #f9f9f9;'>
+                        <p>Dear <strong>" . htmlspecialchars($student_name) . "</strong>,</p>
+                        <p>Your appointment request has been <strong style='color: #2e7d32;'>APPROVED</strong>.</p>
+                        
+                        <div style='background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0;'>
+                            <h3 style='color: #191970; margin-top: 0;'>Appointment Details:</h3>
+                            <p><strong>📅 Date:</strong> " . date('F j, Y', strtotime($appointment_date)) . "</p>
+                            <p><strong>⏰ Time:</strong> " . date('h:i A', strtotime($appointment_time)) . "</p>
+                            <p><strong>📍 Location:</strong> School Clinic</p>
+                            <p><strong>📝 Reason:</strong> " . htmlspecialchars($reason) . "</p>
+                        </div>
+                        
+                        <div style='background: #fff3cd; padding: 15px; border-radius: 8px; margin: 20px 0;'>
+                            <h4 style='color: #856404; margin-top: 0;'>⚠️ Important Reminders:</h4>
+                            <ul style='margin: 0; padding-left: 20px;'>
+                                <li>Please arrive at least 5 minutes before your scheduled time</li>
+                                <li>Bring your school ID</li>
+                                <li>If you need to reschedule, please contact the clinic immediately</li>
+                            </ul>
+                        </div>
+                        
+                        <p>Thank you for using our school clinic services.</p>
+                        <p>Best regards,<br><strong>School Clinic Team</strong></p>
+                    </div>
+                    <div style='background: #eceff1; padding: 15px; text-align: center; font-size: 12px; color: #546e7a; border-radius: 0 0 10px 10px;'>
+                        This is an automated message. Please do not reply to this email.
+                    </div>
+                </div>
+            ";
+        } else {
+            $mail->Subject = 'Appointment Rejected - School Clinic';
+            $mail->Body = "
+                <div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;'>
+                    <div style='background: #c62828; color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;'>
+                        <h2 style='margin: 0;'>❌ Appointment Rejected</h2>
+                    </div>
+                    <div style='padding: 20px; background: #f9f9f9;'>
+                        <p>Dear <strong>" . htmlspecialchars($student_name) . "</strong>,</p>
+                        <p>We regret to inform you that your appointment request has been <strong style='color: #c62828;'>REJECTED</strong>.</p>
+                        
+                        <div style='background: #ffebee; padding: 15px; border-radius: 8px; margin: 20px 0;'>
+                            <h3 style='color: #c62828; margin-top: 0;'>Appointment Details:</h3>
+                            <p><strong>📅 Date:</strong> " . date('F j, Y', strtotime($appointment_date)) . "</p>
+                            <p><strong>⏰ Time:</strong> " . date('h:i A', strtotime($appointment_time)) . "</p>
+                            <p><strong>📝 Reason:</strong> " . htmlspecialchars($reason) . "</p>
+                        </div>
+                        
+                        <p>Please contact the school clinic for more information or to schedule a new appointment.</p>
+                        
+                        <p>Best regards,<br><strong>School Clinic Team</strong></p>
+                    </div>
+                    <div style='background: #eceff1; padding: 15px; text-align: center; font-size: 12px; color: #546e7a; border-radius: 0 0 10px 10px;'>
+                        This is an automated message. Please do not reply to this email.
+                    </div>
+                </div>
+            ";
+        }
+
+        $mail->send();
+        return ['success' => true, 'message' => 'Email sent successfully'];
+    } catch (Exception $e) {
+        return ['success' => false, 'message' => "Email could not be sent. Error: {$mail->ErrorInfo}"];
+    }
+}
 
 // Initialize variables
 $student_data = null;
@@ -61,10 +163,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['appointment_action'])
         // Start transaction
         $db->beginTransaction();
         
-        // Get appointment details first
-        $query = "SELECT a.*, p.student_id, p.full_name as patient_name 
+        // Get appointment details with student email
+        $query = "SELECT a.*, p.student_id, p.full_name as patient_name, p.email as patient_email, p.phone,
+                  s.email as student_email, s.full_name as student_full_name
                   FROM appointments a 
                   JOIN patients p ON a.patient_id = p.id 
+                  LEFT JOIN students s ON p.student_id = s.student_id
                   WHERE a.id = :appointment_id";
         $stmt = $db->prepare($query);
         $stmt->bindParam(':appointment_id', $appointment_id);
@@ -95,10 +199,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['appointment_action'])
                 
                 $db->commit();
                 
-                if ($action === 'approve') {
-                    $success_message = "Appointment #" . $appointment_id . " has been approved successfully!";
+                // Send email notification to student
+                $student_email = $appointment['student_email'] ?? $appointment['patient_email'];
+                $student_name = $appointment['student_full_name'] ?? $appointment['patient_name'];
+                
+                if (!empty($student_email)) {
+                    $email_result = sendAppointmentEmail(
+                        $student_email,
+                        $student_name,
+                        $appointment['appointment_date'],
+                        $appointment['appointment_time'],
+                        $appointment['reason'],
+                        $action_type
+                    );
+                    
+                    if ($action === 'approve') {
+                        if ($email_result['success']) {
+                            $success_message = "Appointment #" . $appointment_id . " has been approved successfully! A notification email has been sent to the student.";
+                        } else {
+                            $success_message = "Appointment #" . $appointment_id . " has been approved, but email notification failed. " . $email_result['message'];
+                        }
+                    } else {
+                        if ($email_result['success']) {
+                            $success_message = "Appointment #" . $appointment_id . " has been rejected. A notification email has been sent to the student.";
+                        } else {
+                            $success_message = "Appointment #" . $appointment_id . " has been rejected, but email notification failed. " . $email_result['message'];
+                        }
+                    }
                 } else {
-                    $success_message = "Appointment #" . $appointment_id . " has been rejected.";
+                    if ($action === 'approve') {
+                        $success_message = "Appointment #" . $appointment_id . " has been approved successfully! (No email address available for notification)";
+                    } else {
+                        $success_message = "Appointment #" . $appointment_id . " has been rejected. (No email address available for notification)";
+                    }
                 }
                 
                 // Log the action
@@ -199,10 +332,12 @@ function fetchClearanceStatus($event_id) {
 // Function to get pending appointments (status = 'scheduled' means approved)
 function getPendingAppointments($db) {
     try {
-        $query = "SELECT a.*, p.student_id, p.full_name as patient_name, p.phone, u.full_name as doctor_name 
+        $query = "SELECT a.*, p.student_id, p.full_name as patient_name, p.phone, u.full_name as doctor_name,
+                  s.email as student_email
                   FROM appointments a 
                   JOIN patients p ON a.patient_id = p.id 
                   LEFT JOIN users u ON a.doctor_id = u.id 
+                  LEFT JOIN students s ON p.student_id = s.student_id
                   WHERE a.status = 'scheduled' 
                   ORDER BY a.appointment_date ASC, a.appointment_time ASC 
                   LIMIT 50";
@@ -219,7 +354,7 @@ function getPendingAppointments($db) {
 function getAppointmentHistory($db) {
     try {
         $query = "SELECT ah.*, a.appointment_date, a.appointment_time, p.student_id, p.full_name as patient_name,
-                  u.username as performed_by_name
+                  u.username as performed_by_name, p.email as patient_email
                   FROM appointment_history ah
                   JOIN appointments a ON ah.appointment_id = a.id
                   JOIN patients p ON a.patient_id = p.id
@@ -238,10 +373,12 @@ function getAppointmentHistory($db) {
 // Function to get appointments by date
 function getAppointmentsByDate($db, $date) {
     try {
-        $query = "SELECT a.*, p.student_id, p.full_name as patient_name, p.phone, u.full_name as doctor_name 
+        $query = "SELECT a.*, p.student_id, p.full_name as patient_name, p.phone, u.full_name as doctor_name,
+                  s.email as student_email
                   FROM appointments a 
                   JOIN patients p ON a.patient_id = p.id 
                   LEFT JOIN users u ON a.doctor_id = u.id 
+                  LEFT JOIN students s ON p.student_id = s.student_id
                   WHERE a.appointment_date = :date 
                   ORDER BY a.appointment_time ASC";
         $stmt = $db->prepare($query);
@@ -2034,7 +2171,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             <div class="dashboard-container">
                 <div class="welcome-section">
                     <h1>🏥 School Health Programs Monitoring</h1>
-                    <p>Track vaccination records, physical exams, deworming, and health screenings. Manage and approve student appointment requests.</p>
+                    <p>Track vaccination records, physical exams, deworming, and health screenings. Manage and approve student appointment requests. Students will receive email notifications for approved appointments.</p>
                 </div>
 
                 <!-- Alert Messages -->
@@ -2151,6 +2288,9 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                             <div class="appointment-info">
                                                 <span class="info-label">Student</span>
                                                 <span class="info-value"><strong><?php echo htmlspecialchars($appointment['patient_name']); ?></strong> (<?php echo htmlspecialchars($appointment['student_id']); ?>)</span>
+                                                <?php if (!empty($appointment['student_email'])): ?>
+                                                    <span class="info-value" style="font-size: 0.8rem;">📧 <?php echo htmlspecialchars($appointment['student_email']); ?></span>
+                                                <?php endif; ?>
                                                 <span class="info-label" style="margin-top: 5px;">Contact</span>
                                                 <span class="info-value"><?php echo htmlspecialchars($appointment['phone'] ?: 'N/A'); ?></span>
                                             </div>
@@ -2264,6 +2404,9 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                             </div>
                                             <div class="appointment-list-details">
                                                 <p><strong><?php echo htmlspecialchars($appointment['patient_name']); ?></strong> (<?php echo htmlspecialchars($appointment['student_id']); ?>)</p>
+                                                <?php if (!empty($appointment['student_email'])): ?>
+                                                    <p style="font-size: 0.8rem;">📧 <?php echo htmlspecialchars($appointment['student_email']); ?></p>
+                                                <?php endif; ?>
                                                 <p>Reason: <?php echo htmlspecialchars($appointment['reason']); ?></p>
                                                 <p>Doctor: <?php echo $appointment['doctor_name'] ? 'Dr. ' . htmlspecialchars($appointment['doctor_name']) : 'Any available'; ?></p>
                                             </div>
@@ -2280,12 +2423,12 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                     <table class="history-table">
                                         <thead>
                                             <tr>
-                                                <th>Date</th>
+                                                <th>Date/Time</th>
                                                 <th>Action</th>
                                                 <th>Student</th>
                                                 <th>Appointment</th>
                                                 <th>Performed By</th>
-                                                <th>Notes</th>
+                                                <th>Email Status</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -2305,7 +2448,13 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                                         <?php echo date('M d', strtotime($history['appointment_date'])); ?> at <?php echo date('h:i A', strtotime($history['appointment_time'])); ?>
                                                     </td>
                                                     <td><?php echo htmlspecialchars($history['performed_by_name']); ?></td>
-                                                    <td><?php echo htmlspecialchars($history['notes']); ?></td>
+                                                    <td>
+                                                        <?php if (!empty($history['patient_email'])): ?>
+                                                            <span style="color: #2e7d32;">📧 Notification sent</span>
+                                                        <?php else: ?>
+                                                            <span style="color: #c62828;">⚠️ No email</span>
+                                                        <?php endif; ?>
+                                                    </td>
                                                 </tr>
                                             <?php endforeach; ?>
                                         </tbody>
@@ -2454,6 +2603,9 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                             Student ID: <?php echo htmlspecialchars($student_data['student_id']); ?> | 
                             Grade <?php echo htmlspecialchars($student_data['year_level'] ?? 'N/A'); ?> - 
                             <?php echo htmlspecialchars($student_data['section'] ?? 'N/A'); ?>
+                            <?php if (!empty($student_data['email'])): ?>
+                                <br>📧 <?php echo htmlspecialchars($student_data['email']); ?>
+                            <?php endif; ?>
                         </p>
                         <?php if (!empty($student_data['medical_conditions']) || !empty($student_data['allergies'])): ?>
                             <p style="margin-top: 8px;">
