@@ -34,7 +34,7 @@ function sendAppointmentEmail($student_email, $student_name, $appointment_date, 
         $mail->Host       = 'smtp.gmail.com';
         $mail->SMTPAuth   = true;
         $mail->Username   = 'stephenviray12@gmail.com'; // Replace with your email
-        $mail->Password   = 'your-app-password'; // Replace with your app password
+        $mail->Password = 'bubr nckn tgqf lvus';
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
 
