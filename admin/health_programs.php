@@ -33,7 +33,7 @@ function sendAppointmentEmail($student_email, $student_name, $appointment_date, 
         $mail->isSMTP();
         $mail->Host       = 'smtp.gmail.com';
         $mail->SMTPAuth   = true;
-        $mail->Username   = 'stephenviray12@gmail.com'; // Replace with your email
+        $mail->Username   = 'stephenviray12@gmail.com';
         $mail->Password = 'bubr nckn tgqf lvus';
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
@@ -912,6 +912,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
     <style>
         * {
             margin: 0;
@@ -2343,26 +2344,18 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
                                             </div>
                                         </div>
                                         <div class="appointment-actions">
-                                            <form method="POST" action="" style="display: inline;" onsubmit="return confirm('Approve this appointment? An email notification will be sent to the student.');">
-                                                <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
-                                                <input type="hidden" name="appointment_action" value="approve">
-                                                <button type="submit" class="action-btn approve">
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                                        <path d="M20 6L9 17L4 12"/>
-                                                    </svg>
-                                                    Approve & Notify
-                                                </button>
-                                            </form>
-                                            <form method="POST" action="" style="display: inline;" onsubmit="return confirm('Reject this appointment? An email notification will be sent to the student.');">
-                                                <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
-                                                <input type="hidden" name="appointment_action" value="reject">
-                                                <button type="submit" class="action-btn reject">
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                                                        <path d="M18 6L6 18M6 6L18 18"/>
-                                                    </svg>
-                                                    Reject & Notify
-                                                </button>
-                                            </form>
+                                            <button type="button" class="action-btn approve" onclick="confirmAction(<?php echo $appointment['id']; ?>, 'approve', '<?php echo htmlspecialchars($appointment['patient_name']); ?>', '<?php echo date('M d, Y', strtotime($appointment['appointment_date'])); ?>', '<?php echo date('h:i A', strtotime($appointment['appointment_time'])); ?>')">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                                    <path d="M20 6L9 17L4 12"/>
+                                                </svg>
+                                                Approve & Notify
+                                            </button>
+                                            <button type="button" class="action-btn reject" onclick="confirmAction(<?php echo $appointment['id']; ?>, 'reject', '<?php echo htmlspecialchars($appointment['patient_name']); ?>', '<?php echo date('M d, Y', strtotime($appointment['appointment_date'])); ?>', '<?php echo date('h:i A', strtotime($appointment['appointment_time'])); ?>')">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                                    <path d="M18 6L6 18M6 6L18 18"/>
+                                                </svg>
+                                                Reject & Notify
+                                            </button>
                                         </div>
                                     </div>
                                 <?php endforeach; ?>
@@ -3398,6 +3391,7 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
     </script>
     <?php endif; ?>
 
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
         // Sidebar toggle
         const sidebar = document.querySelector('.sidebar');
@@ -3408,6 +3402,57 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
             collapseBtn.addEventListener('click', () => {
                 sidebar.classList.toggle('collapsed');
                 mainContent.classList.toggle('expanded');
+            });
+        }
+
+        // Confirmation function with SweetAlert2
+        function confirmAction(appointmentId, action, studentName, date, time) {
+            let title, text, confirmButtonColor, icon;
+            
+            if (action === 'approve') {
+                title = 'Approve Appointment?';
+                text = `Are you sure you want to approve this appointment for ${studentName} on ${date} at ${time}? An email notification will be sent to the student.`;
+                confirmButtonColor = '#2e7d32';
+                icon = 'question';
+            } else {
+                title = 'Reject Appointment?';
+                text = `Are you sure you want to reject this appointment for ${studentName} on ${date} at ${time}? An email notification will be sent to the student.`;
+                confirmButtonColor = '#c62828';
+                icon = 'warning';
+            }
+
+            Swal.fire({
+                title: title,
+                text: text,
+                icon: icon,
+                showCancelButton: true,
+                confirmButtonColor: confirmButtonColor,
+                cancelButtonColor: '#546e7a',
+                confirmButtonText: action === 'approve' ? 'Yes, approve it!' : 'Yes, reject it!',
+                cancelButtonText: 'Cancel',
+                reverseButtons: true,
+                showLoaderOnConfirm: true,
+                preConfirm: () => {
+                    // Create and submit form
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = '';
+                    
+                    const idInput = document.createElement('input');
+                    idInput.type = 'hidden';
+                    idInput.name = 'appointment_id';
+                    idInput.value = appointmentId;
+                    
+                    const actionInput = document.createElement('input');
+                    actionInput.type = 'hidden';
+                    actionInput.name = 'appointment_action';
+                    actionInput.value = action;
+                    
+                    form.appendChild(idInput);
+                    form.appendChild(actionInput);
+                    document.body.appendChild(form);
+                    form.submit();
+                }
             });
         }
 
@@ -3473,6 +3518,27 @@ if (empty($student_id_search) && isset($_SESSION['verified_student_id_health']))
         if (pageTitle) {
             pageTitle.textContent = 'Health Programs';
         }
+
+        // Show success message with SweetAlert if there's a success message
+        <?php if ($success_message): ?>
+        Swal.fire({
+            icon: 'success',
+            title: 'Success!',
+            text: '<?php echo addslashes($success_message); ?>',
+            showConfirmButton: true,
+            timer: 5000
+        });
+        <?php endif; ?>
+
+        // Show error message with SweetAlert if there's an error message
+        <?php if ($error_message): ?>
+        Swal.fire({
+            icon: 'error',
+            title: 'Error!',
+            text: '<?php echo addslashes($error_message); ?>',
+            showConfirmButton: true
+        });
+        <?php endif; ?>
     </script>
 </body>
 </html>
