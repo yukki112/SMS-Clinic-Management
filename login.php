@@ -415,9 +415,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     </div>
                 </div>
 
-                <div class="info-row">
-                    <span class="info-text"><i class="fas fa-info-circle"></i> Students: Default password is 0000</span>
-                </div>
+               
 
                 <button type="submit" class="btn btn-primary btn-block" id="loginBtn">
                     <i class="fas fa-arrow-right-to-bracket"></i> Sign In
