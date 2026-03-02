@@ -1375,7 +1375,7 @@ $ai_insights = generateAIInsights($db, $stats, $user_role);
                 <div class="recent-section">
                     <div class="section-header">
                         <h2>Recent Appointments</h2>
-                        <a href="appointments.php" class="view-all">View All Appointments</a>
+                        <a href="health_programs.php" class="view-all">View All Appointments</a>
                     </div>
                     <div class="table-wrapper">
                         <table class="data-table">
@@ -1488,7 +1488,7 @@ $ai_insights = generateAIInsights($db, $stats, $user_role);
                             </div>
                             <span>Issue Clearance</span>
                         </a>
-                        <a href="generate-report.php" class="action-card">
+                        <a href="reports.php" class="action-card">
                             <div class="action-icon">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
                                     <path d="M3 3V21H21"/>
@@ -1497,16 +1497,7 @@ $ai_insights = generateAIInsights($db, $stats, $user_role);
                             </div>
                             <span>Reports</span>
                         </a>
-                        <a href="backup.php" class="action-card">
-                            <div class="action-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-                                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-                                    <polyline points="17 21 17 13 7 13 7 21"/>
-                                    <polyline points="7 3 7 8 15 8"/>
-                                </svg>
-                            </div>
-                            <span>Backup</span>
-                        </a>
+                        
                     </div>
                 </div>
             </div>
@@ -1588,7 +1579,7 @@ $ai_insights = generateAIInsights($db, $stats, $user_role);
 
         // View appointment function
         function viewAppointment(id) {
-            window.location.href = 'appointment-details.php?id=' + id;
+            window.location.href = 'health_programs.php?id=' + id;
         }
 
         // Update page title based on current page
