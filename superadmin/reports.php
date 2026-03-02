@@ -355,7 +355,7 @@ function getSmartRecommendations($db, $predictions, $anomalies, $seasonal_trends
             'title' => 'Seasonal Health Advisory',
             'message' => 'Common this month: ' . implode(', ', array_slice($complaints, 0, 3)) . 
                         '. Ensure adequate supplies for these conditions.',
-            'action' => 'Check Supplies'
+            
         ];
     }
     
@@ -385,7 +385,7 @@ function getSmartRecommendations($db, $predictions, $anomalies, $seasonal_trends
             'message' => "Busiest time: {$peak['day_name']}s at " . 
                         date('g A', strtotime("{$hour}:00")) . 
                         ". Consider optimizing staff schedule during these hours.",
-            'action' => 'Optimize Schedule'
+           
         ];
     }
     
